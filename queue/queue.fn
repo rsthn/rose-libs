@@ -1,0 +1,22 @@
+
+(def-fn queue::get groupName operationId
+	(set filePath "queue/(groupName)/(operationId).json")
+	(when-not (path::exists (filePath)) (ret null))
+	(utils::json::parse (file::read (filePath)))
+)
+
+(def-fn queue::put groupName operationId data
+	(set filePath "queue/(groupName)/(operationId).json")
+	(file::write (filePath) (utils::json::stringify (data)))
+)
+
+(def-fn queue::remove groupName operationId
+	(set filePath "queue/(groupName)/(operationId).json")
+	(file::remove (filePath))
+)
+
+(def-fn queue::add groupName data
+	(set operationId (utils::uuid))
+	(queue::put (groupName) (operationId) (data))
+	(operationId)
+)

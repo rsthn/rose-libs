@@ -1,0 +1,39 @@
+
+;; Requires:
+;; - config.openai.key
+;; - config.openai.orgid
+
+(def-fn openai::chat::complete prompt model="gpt-3.5-turbo" temperature=0.25
+
+	(http::clear)
+	(http::auth "bearer" (config.openai.key))
+	(http::header "OpenAI-Organization: (config.openai.orgid)")
+
+	(set data (&
+		model (model)
+		temperature (temperature)
+		messages (#
+			(& role "user" content (prompt))
+		)
+	))
+
+	(set res (http::fetch "post" "https://api.openai.com/v1/chat/completions" (utils::json::stringify (data))))
+	(when (ne 200 (http::code))
+		(throw "OpenAI returned code (http::code)"))
+
+	(for i (res.choices)
+		(when (ne "assistant" (i.message.role))
+			(continue))
+
+		(when (ne "stop" (i.finish_reason))
+			(throw "Finish reason: (i.finish_reason) | Usage: (res.usage)"))
+
+		(try
+			(ret (utils::json::parse (i.message.content)))
+		catch
+			(throw "Unable to parse input JSON: (i.message.content)")
+		)
+	)
+
+	(throw "No usable response from OpenAI")
+)

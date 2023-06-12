@@ -1,0 +1,34 @@
+
+;; Requires:
+;; - config.azure.key
+;; - config.azure.endpoint
+
+(def-fn azure::analyze imageBlob
+
+	(http::clear)
+	(http::headers (#
+		"ocp-apim-subscription-key: (config.azure.key)"
+		"content-type: image/png"
+	))
+
+	(http::post "https://(config.azure.endpoint)/vision/v3.2/read/analyze?language=es&readingOrder=natural" (imageBlob))
+
+	(when (eq 202 (http::code))
+		(ret (array::last (split "/" (map::get (http::headers) "operation-location"))) ))
+
+	(throw "Azure returned code (http::code)")
+)
+
+(def-fn azure::analyzeResults operationId
+
+	(http::clear)
+	(http::header "ocp-apim-subscription-key: (config.azure.key)")
+
+	(set res (http::fetch "get" "https://(config.azure.endpoint)/vision/v3.2/read/analyzeResults/(operationId)"))
+	(when (ne "succeeded" (res.status)) (ret null))
+
+	(set res (res.analyzeResult.readResults))
+	(when-not (res.length) (ret ""))
+
+	(join " " (map i (res."0".lines) (i.text)))
+)
