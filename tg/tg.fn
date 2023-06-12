@@ -1,0 +1,243 @@
+;;
+;; Telegram bot interface.
+;;
+
+(set tgToken "")
+
+;;
+;; Sets the bot token.
+;; @param {string} value
+;;
+(def-fn tg::setToken value
+	(set local.tgToken (value))
+)
+
+
+;;
+;; Executes an API call.
+;; @param {string} methodName
+;; @param {object} [data]
+;; @returns {object}
+;;
+(def-fn tgCall methodName data=null
+
+	(set data
+		(if (data)
+			(http::fetch POST "https://api.telegram.org/bot(local.tgToken)/(methodName)" (data))
+		else
+			(http::fetch GET "https://api.telegram.org/bot(local.tgToken)/(methodName)")
+		)
+	)
+
+	(when-not (data.ok)
+		(throw (data.description)))
+
+	(data.result)
+)
+
+
+;;
+;; Returns information about the bot.
+;;
+;; @returns {{
+;;		id: number
+;;		is_bot: boolean
+;;		first_name: string
+;;		username: string
+;;		can_join_groups: boolean
+;;		can_read_all_group_messages: boolean
+;;		supports_inline_queries: boolean
+;;	}}
+;;
+(def-fn tg::getMe
+	(tgCall "getMe")
+)
+
+
+;;
+;; Sends a message to a chat ID.
+;;
+;; @param {number|string} chatId
+;; @param {string} text
+;; @param {number} [replyId]
+;;
+;; @returns {{
+;;		message_id: number
+;;		from: {
+;;			id: number
+;;			is_bot: boolean
+;;			first_name: string
+;;			username: string
+;;		}
+;;		chat: {
+;;			id: number
+;;			first_name: string
+;;			last_name: string
+;;			username: string
+;;			type: "private"|"group”|"supergroup”|"channel”
+;;		}
+;;		date: number
+;;		text: string
+;; }}
+;;
+(def-fn tg::sendMessage chatId message replyId=null
+	(tgCall "sendMessage" (& chat_id (chatId) text (message) parse_mode "HTML" reply_to_message_id (replyId)))
+)
+
+
+;;
+;; Sends a photo to a chat.
+;;
+;; @param {number|string} chatId
+;; @param {string} photoPath
+;; @param {string} [caption]
+;; @param {number} [replyId]
+;;
+;; @returns {{
+;; 		message_id: number
+;;		from: {
+;;		    id: number
+;;		    is_bot: boolean
+;;		    first_name: string
+;;		    username: string
+;;		}
+;;		chat: {
+;;		    id: number
+;;		    first_name: string
+;;		    last_name: string
+;;		    username: string
+;;		    type: "private"|"group”|"supergroup”|"channel”
+;;		}
+;;		date: number
+;;		photo: [
+;;		    {
+;;		        file_id: string
+;;		        file_unique_id: string
+;;		        file_size: number
+;;		        width: number
+;;		        height: number
+;;		    }
+;;		]
+;; }}
+;;
+(def-fn tg::sendPhoto chatId photoPath caption=null replyId=null
+	(tgCall "sendPhoto" (& chat_id (chatId) photo (& path (photoPath)) parse_mode "HTML" caption (caption) reply_to_message_id (replyId)))
+)
+
+
+;;
+;; Sends a document to a chat.
+;;
+;; @param {number|string} chatId
+;; @param {string} docPath
+;; @param {string} [caption]
+;; @param {number} [replyId]
+;;
+;; @returns {{
+;; 		message_id: number
+;;		from: {
+;;		    id: number
+;;		    is_bot: boolean
+;;		    first_name: string
+;;		    username: string
+;;		}
+;;		chat: {
+;;		    id: number
+;;		    first_name: string
+;;		    last_name: string
+;;		    username: string
+;;		    type: "private"|"group”|"supergroup”|"channel”
+;;		}
+;;		date: number
+;;		document: {
+;;			file_name: string
+;;			mime_type: string
+;;			thumb: {
+;;				file_id: string
+;;				file_unique_id: string
+;;				file_size: number
+;;				width: number
+;;				height: number
+;;			}
+;;			file_id: string
+;;			file_unique_id: string
+;;			file_size: number
+;;		}
+;; }}
+;;
+(def-fn tg::sendDocument chatId docPath caption=null replyId=null
+	(tgCall "sendDocument" (& chat_id (chatId) document (& path (docPath)) parse_mode "HTML" caption (caption) reply_to_message_id (replyId)))
+)
+
+(def-fn tg::sendLocation chatId lat lon replyId=null
+	(tgCall "sendLocation" (& chat_id (chatId) latitude (lat) longitude (lon) reply_to_message_id (replyId)))
+)
+
+(def-fn tg::getUpdates offset=0
+	(tgCall "getUpdates" (& offset (offset)))
+)
+
+
+;;
+;; Returns information about a chat.
+;;
+;; @param {number|string} chatId
+;;
+;; @returns {{
+;; 		type: "private"
+;; 		id: number
+;; 		first_name: string
+;; 		last_name: string
+;; 		username: string
+;; 		photo: {
+;;     		small_file_id: string
+;;       	small_file_unique_id: string
+;;       	big_file_id: string
+;;       	big_file_unique_id: string
+;;		}
+;;	}}
+;;
+;; @returns {{
+;; 		type: "supergroup”
+;; 		id: number
+;; 		title: string
+;; 		invite_link: string
+;; 		join_to_send_messages: boolean
+;; 		photo: {
+;;     		small_file_id: string
+;;       	small_file_unique_id: string
+;;       	big_file_id: string
+;;       	big_file_unique_id: string
+;;		}
+;; 		pinned_message: {
+;;     		message_id: number
+;;     		from: {
+;;	 			id: number
+;;	 			is_bot: boolean
+;;	 			first_name: string
+;;	 			language_code: string
+;;			}
+;;	 		chat: {
+;;	 			id: number
+;;	 			title: string
+;;	 			type: "supergroup”
+;;			}
+;;     		date: number
+;;     		edit_date: number
+;;     		text: string
+;;		}
+;;	}}
+;;
+(def-fn tg::getChat chatId
+	(tgCall "getChat" (& chat_id (chatId)))
+)
+
+
+;;
+;; Returns the number of members in a chat.
+;; @param {number|string} chatId
+;; @returns {number}
+;;
+(def-fn tg::getChatMemberCount chatId
+	(tgCall "getChatMemberCount" (& chat_id (chatId)))
+)
