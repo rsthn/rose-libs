@@ -3,33 +3,150 @@
 ;; - config.openai.key
 ;; - config.openai.orgid
 
-(def-fn openai::chat::complete prompt model="gpt-3.5-turbo" temperature=0.25
+(set functions (&
+))
+
+(set fnDescriptors (&
+))
+
+(def openai::model::gpt3 "gpt-3.5-turbo-0613")
+(def openai::model::gpt3_xl "gpt-3.5-turbo-16k-0613")
+(def openai::model::gpt4 "gpt-4")
+(def openai::model::gpt4_xl "gpt-4-32k")
+(def openai::model::gpt4_turbo "gpt-4-1106-preview")
+
+(def-fn openai::message role name content=null
+	(if (content)
+		(& role (role) content (content) name (name) )
+	else
+		(& role (role) content (name) )
+	)
+)
+
+(def-fn openai::string description=""
+	(&
+		type "string"
+		description (description)
+	)
+)
+
+(def-fn openai::integer description=""
+	(&
+		type "integer"
+		description (description)
+	)
+)
+
+(def-fn openai::boolean description=""
+	(&
+		type "boolean"
+		description (description)
+	)
+)
+
+(def-fn openai::number description=""
+	(&
+		type "number"
+		description (description)
+	)
+)
+
+(def-fn openai::enum options description=""
+	(&
+		type "string"
+		description (description)
+		enum (options)
+	)
+)
+
+(def-fn openai::getFunctions
+	(map::values (local.fnDescriptors))
+)
+
+(def-fn openai::function name description parameterList requiredList functionRef
+	(set local.functions.(name) (functionRef))
+
+	(set fdef (&
+		name (name)
+		description (description)
+		parameters (&
+			type "object"
+			properties (parameterList)
+			required (requiredList)
+		)
+	))
+
+	(set local.fnDescriptors.(name) (fdef))
+	(fdef)
+)
+
+(def-fn openai::chat::request model messages functions=null temperature="0.25"
+
+	(set o (&
+		model (model)
+		temperature (float (temperature))
+		top_p 0.5
+		messages (messages)
+	))
+
+	(when (functions)
+		(set o.functions (functions))
+		(set o.function_call "auto")
+	)
+
+	(o)
+)
+
+(def-fn openai::chat::complete chatRequest
 
 	(http::clear)
 	(http::auth "bearer" (config.openai.key))
 	(http::header "OpenAI-Organization: (config.openai.orgid)")
 
-	(set data (&
-		model (model)
-		temperature (temperature)
-		messages (#
-			(& role "user" content (prompt))
-		)
-	))
+	;;(echo "\e[36mREQUEST:\e[0m")
+	;;(echo (utils::json::prettify (chatRequest.messages)))
 
-	(set res (http::fetch "post" "https://api.openai.com/v1/chat/completions" (utils::json::stringify (data))))
+	(set res (http::fetch "POST" "https://api.openai.com/v1/chat/completions" (utils::json::stringify (chatRequest))))
 	(when (ne 200 (http::code))
-		(throw "OpenAI returned code (http::code)"))
+		(throw "OpenAI returned code (http::code) res=(res)"))
+
+	;;(echo "\e[35mRESPONSE:\e[0m")
+	;;(echo (utils::json::prettify (res.choices)))
 
 	(for i (res.choices)
 		(when (ne "assistant" (i.message.role))
 			(continue))
 
+		(when (eq "function_call" (i.finish_reason))
+
+			;; Remove function call from functions list for next completion.
+			;(array::remove (chatRequest.functions) (findIndex j (chatRequest.functions) (eq (i.message.function_call.name) (j.name))))
+
+			;; Remove `functions` and `function_call` from request if no more functions are left.
+			;(when (eq 0 (array::length (chatRequest.functions)))
+			;	(map::remove (chatRequest) "functions")
+			;	(map::remove (chatRequest) "function_call")
+			;)
+
+			(set fdata
+				((local.functions.(i.message.function_call.name)) (utils::json::parse (i.message.function_call.arguments)))
+			)
+
+			(echo "RES \e[94m(fdata)\e[0m")
+
+			(array::push (chatRequest.messages) (i.message))
+			(array::push (chatRequest.messages) (openai::message "function" (i.message.function_call.name) (utils::json::stringify (fdata))))
+
+			(ret (openai::chat::complete (chatRequest)))
+		)
+
 		(when (ne "stop" (i.finish_reason))
 			(throw "Finish reason: (i.finish_reason) | Usage: (res.usage)"))
 
 		(try
-			(ret (utils::json::parse (i.message.content)))
+			(array::push (chatRequest.messages) (i.message))
+			(ret (i.message.content))
+
 		catch
 			(throw "Unable to parse input JSON: (i.message.content)")
 		)
