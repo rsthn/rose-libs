@@ -1,243 +1,340 @@
-;;
-;; Telegram bot interface.
-;;
 
 (set tgToken "")
+(set tgHandlers (&
+    "message" null
+))
 
-;;
 ;; Sets the bot token.
 ;; @param {string} value
-;;
-(def-fn tg::setToken value
-	(set local.tgToken (value))
+(def-fn tg:setToken value
+    (set local.tgToken (value))
 )
 
 
-;;
+;; Registers a handler for the message event.
+;; @param { (from, chat, message) => void } handler
+(def-fn tg:onMessage callback
+    (set local.tgHandlers.message (callback))
+)
+
+
 ;; Executes an API call.
 ;; @param {string} methodName
 ;; @param {object} [data]
 ;; @returns {object}
-;;
-(def-fn tgCall methodName data=null
+(def-fn tg:call methodName data=null
 
-	(set data
-		(if (data)
-			(http::fetch POST "https://api.telegram.org/bot(local.tgToken)/(methodName)" (data))
-		else
-			(http::fetch GET "https://api.telegram.org/bot(local.tgToken)/(methodName)")
-		)
-	)
+    (set data
+        (if (data)
+            (http:fetch "POST" "https://api.telegram.org/bot(local.tgToken)/(methodName)" (data))
+        else
+            (http:fetch "GET" "https://api.telegram.org/bot(local.tgToken)/(methodName)")
+        )
+    )
 
-	(when-not (data.ok)
-		(throw (data.description)))
+    (when-not (data.ok)
+        (throw (data.description)))
 
-	(data.result)
+    (trace "tg:call (methodName): " (data.result))
+    ; data.description
+    (data.result)
 )
 
 
-;;
 ;; Returns information about the bot.
-;;
 ;; @returns {{
-;;		id: number
-;;		is_bot: boolean
-;;		first_name: string
-;;		username: string
-;;		can_join_groups: boolean
-;;		can_read_all_group_messages: boolean
-;;		supports_inline_queries: boolean
+;;      id: number
+;;      is_bot: boolean
+;;      first_name: string
+;;      username: string
+;;      can_join_groups: boolean
+;;      can_read_all_group_messages: boolean
+;;      supports_inline_queries: boolean
 ;;	}}
-;;
-(def-fn tg::getMe
-	(tgCall "getMe")
+(def-fn tg:getMe
+    (tg:call "getMe")
 )
 
 
-;;
+;; Sets the webhook of the bot. Returns the `secret_token` on success or `null` on failure.
+;; @param {string} url
+;; @param {object} [webhookConfig]
+;; @returns {string|null}
+(def-fn tg:setWebhook url webhookConfig=(&)
+    (set secret_token (or
+        (webhookConfig.secret_token) 
+        (substr 0 128 (base64u:encode (openssl:random-bytes 128)))
+    ))
+
+    (set webhookConfig (&
+        url (url)
+        ip_address (webhookConfig.ip_address)
+        max_connections (or (webhookConfig.max_connections) 40)
+        allowed_updates (or (webhookConfig.allowed_updates) (#))
+        drop_pending_updates true
+        secret_token (secret_token)
+    ))
+
+    (when-not (tg:call "setWebhook" (webhookConfig))
+        (ret null))
+
+    (secret_token)
+)
+
+
+;; Removes the webhook of the bot.
+;; @returns {boolean}
+(def-fn tg:deleteWebhook
+    (bool (tg:call "deleteWebhook"))
+)
+
+
+;; Returns webhook information.
+;; @returns {{
+;;      url: string
+;;      has_custom_certificate: boolean
+;;      pending_update_count: number
+;;      ip_address: string
+;;      last_error_date: number
+;;      last_error_message: string
+;;      max_connections: number
+;;      allowed_updates: string[]
+;;	}}
+(def-fn tg:getWebhookInfo
+    (tg:call "getWebhookInfo")
+)
+
+
 ;; Sends a message to a chat ID.
-;;
 ;; @param {number|string} chatId
 ;; @param {string} text
 ;; @param {number} [replyId]
-;;
-;; @returns {{
-;;		message_id: number
-;;		from: {
-;;			id: number
-;;			is_bot: boolean
-;;			first_name: string
-;;			username: string
-;;		}
-;;		chat: {
-;;			id: number
-;;			first_name: string
-;;			last_name: string
-;;			username: string
-;;			type: "private"|"group”|"supergroup”|"channel”
-;;		}
-;;		date: number
-;;		text: string
-;; }}
-;;
-(def-fn tg::sendMessage chatId message replyId=null
-	(tgCall "sendMessage" (& chat_id (chatId) text (message) parse_mode "HTML" reply_to_message_id (replyId)))
+;; @returns {Message}
+(def-fn tg:sendMessage chatId message replyId=null
+    (tg:call "sendMessage" (& chat_id (chatId) text (message) parse_mode "HTML" reply_to_message_id (replyId)))
 )
 
 
-;;
-;; Sends a photo to a chat.
-;;
+;; Deletes one or more messages.
 ;; @param {number|string} chatId
-;; @param {string} photoPath
+;; @param {int|array[int]} messageId
+;; @returns {boolean}
+(def-fn tg:deleteMessage chatId messageId
+    (if (eq "array" (typeof (messageId)))
+        (tg:call "deleteMessages" (& chat_id (chatId) message_ids (messageId) ))
+    else
+        (tg:call "deleteMessage" (& chat_id (chatId) message_id (messageId) ))
+    )
+)
+
+
+;; Sends a photo to a chat. The `photo` parameter can be a file_id, a URL, a {name:str, data:str} or a {path: str} object.
+;; @param {number|string} chatId
+;; @param {string|object} photo
 ;; @param {string} [caption]
 ;; @param {number} [replyId]
-;;
-;; @returns {{
-;; 		message_id: number
-;;		from: {
-;;		    id: number
-;;		    is_bot: boolean
-;;		    first_name: string
-;;		    username: string
-;;		}
-;;		chat: {
-;;		    id: number
-;;		    first_name: string
-;;		    last_name: string
-;;		    username: string
-;;		    type: "private"|"group”|"supergroup”|"channel”
-;;		}
-;;		date: number
-;;		photo: [
-;;		    {
-;;		        file_id: string
-;;		        file_unique_id: string
-;;		        file_size: number
-;;		        width: number
-;;		        height: number
-;;		    }
-;;		]
-;; }}
-;;
-(def-fn tg::sendPhoto chatId photoPath caption=null replyId=null
-	(tgCall "sendPhoto" (& chat_id (chatId) photo (& path (photoPath)) parse_mode "HTML" caption (caption) reply_to_message_id (replyId)))
+;; @returns {Message}
+(def-fn tg:sendPhoto chatId photo caption=null replyId=null
+    (tg:call "sendPhoto" (&
+        chat_id (chatId)
+        photo (photo)
+        parse_mode "HTML"
+        caption (caption)
+        reply_to_message_id (replyId)
+    ))
 )
 
-
-;;
-;; Sends a document to a chat.
-;;
+;; Sends a document to a chat. The `document` parameter can be a file_id, a URL, a {name:str, data:str} or a {path: str} object.
 ;; @param {number|string} chatId
-;; @param {string} docPath
+;; @param {string} document
 ;; @param {string} [caption]
 ;; @param {number} [replyId]
-;;
-;; @returns {{
-;; 		message_id: number
-;;		from: {
-;;		    id: number
-;;		    is_bot: boolean
-;;		    first_name: string
-;;		    username: string
-;;		}
-;;		chat: {
-;;		    id: number
-;;		    first_name: string
-;;		    last_name: string
-;;		    username: string
-;;		    type: "private"|"group”|"supergroup”|"channel”
-;;		}
-;;		date: number
-;;		document: {
-;;			file_name: string
-;;			mime_type: string
-;;			thumb: {
-;;				file_id: string
-;;				file_unique_id: string
-;;				file_size: number
-;;				width: number
-;;				height: number
-;;			}
-;;			file_id: string
-;;			file_unique_id: string
-;;			file_size: number
-;;		}
-;; }}
-;;
-(def-fn tg::sendDocument chatId docPath caption=null replyId=null
-	(tgCall "sendDocument" (& chat_id (chatId) document (& path (docPath)) parse_mode "HTML" caption (caption) reply_to_message_id (replyId)))
+;; @returns {Message}
+(def-fn tg:sendDocument chatId document caption=null replyId=null
+    (tg:call "sendDocument" (& chat_id (chatId) document (document) parse_mode "HTML" caption (caption) reply_to_message_id (replyId)))
 )
 
-(def-fn tg::sendLocation chatId lat lon replyId=null
-	(tgCall "sendLocation" (& chat_id (chatId) latitude (lat) longitude (lon) reply_to_message_id (replyId)))
+;; Sends a location to a chat.
+;; @param {number|string} chatId
+;; @param {number} latitude
+;; @param {number} longitude
+;; @param {number} [replyId]
+;; @returns {Message}
+(def-fn tg:sendLocation chatId latitude longitude replyId=null
+    (tg:call "sendLocation" (& chat_id (chatId) latitude (latitude) longitude (longitude) reply_to_message_id (replyId)))
 )
 
-(def-fn tg::getUpdates offset=0
-	(tgCall "getUpdates" (& offset (offset)))
+;; Use this method when you need to tell the user that something is happening on the bot's side.
+;; The status is set for 5 seconds or less (when a message arrives from your bot, Telegram clients clear its typing status).
+;; Action values: typing, upload_photo, record_video, upload_video, record_audio, upload_audio, upload_document, 
+;; find_location, record_video_note, or upload_video_note.
+;;
+;; @param {number|string} chatId
+;; @param {string} action
+;; @returns {boolean}
+(def-fn tg:sendChatAction chatId action
+    (tg:call "sendChatAction" (& chat_id (chatId) action (action)))
 )
 
 
-;;
+;; Polls for updates from the Telegram API and executes the respective event if registered.
+;; Returns the next update_id which can be used in subsequent calls (as the `offset` parameter) to avoid duplicate updates.
+;; @param {number} [offset] Identifier of the first update to be returned.
+;; @returns {number}
+(def-fn tg:getUpdates offset=0
+    (tg:processUpdates (tg:call "getUpdates" (&
+        offset (offset)
+        limit 100
+    )))
+)
+
+
+;; Processes a list of updates and returns the next update_id.
+;; @param {list[Update]} updateList
+;; @returns {number}
+(def-fn tg:processUpdates updateList
+    (set last_update_id 0)
+
+    (for update (updateList)
+        (set last_update_id (update.update_id))
+
+        (when (has "message" (update))
+            (when (local.tgHandlers.message)
+                ((local.tgHandlers.message)
+                    (update.message.from)
+                    (update.message.chat)
+                    (update.message)
+                )
+            )
+            (continue)
+        )
+
+        (trace "[UNHANDLED] (update.message)")
+    )
+
+    (+ 1 (last_update_id))
+)
+
+
 ;; Returns information about a chat.
-;;
 ;; @param {number|string} chatId
 ;;
 ;; @returns {{
-;; 		type: "private"
-;; 		id: number
-;; 		first_name: string
-;; 		last_name: string
-;; 		username: string
-;; 		photo: {
-;;     		small_file_id: string
+;;      type: "private"
+;;      id: number
+;;      first_name: string
+;;      last_name: string
+;;      username: string
+;;      photo: {
+;;          small_file_id: string
 ;;       	small_file_unique_id: string
 ;;       	big_file_id: string
 ;;       	big_file_unique_id: string
-;;		}
+;;      }
 ;;	}}
 ;;
 ;; @returns {{
-;; 		type: "supergroup”
-;; 		id: number
-;; 		title: string
-;; 		invite_link: string
-;; 		join_to_send_messages: boolean
-;; 		photo: {
-;;     		small_file_id: string
+;;      type: "supergroup”
+;;      id: number
+;;      title: string
+;;      invite_link: string
+;;      join_to_send_messages: boolean
+;;      photo: {
+;;          small_file_id: string
 ;;       	small_file_unique_id: string
 ;;       	big_file_id: string
 ;;       	big_file_unique_id: string
-;;		}
-;; 		pinned_message: {
-;;     		message_id: number
-;;     		from: {
-;;	 			id: number
-;;	 			is_bot: boolean
-;;	 			first_name: string
-;;	 			language_code: string
-;;			}
-;;	 		chat: {
-;;	 			id: number
-;;	 			title: string
-;;	 			type: "supergroup”
-;;			}
-;;     		date: number
-;;     		edit_date: number
-;;     		text: string
-;;		}
+;;      }
+;;      pinned_message: {
+;;          message_id: number
+;;          from: {
+;;	        	id: number
+;;	        	is_bot: boolean
+;;	        	first_name: string
+;;	        	language_code: string
+;;      	}
+;;	        chat: {
+;;	        	id: number
+;;	        	title: string
+;;	        	type: "supergroup”
+;;      	}
+;;          date: number
+;;          edit_date: number
+;;          text: string
+;;      }
 ;;	}}
 ;;
-(def-fn tg::getChat chatId
-	(tgCall "getChat" (& chat_id (chatId)))
+(def-fn tg:getChat chatId
+    (tg:call "getChat" (& chat_id (chatId)))
 )
 
 
-;;
 ;; Returns the number of members in a chat.
 ;; @param {number|string} chatId
 ;; @returns {number}
-;;
-(def-fn tg::getChatMemberCount chatId
-	(tgCall "getChatMemberCount" (& chat_id (chatId)))
+(def-fn tg:getChatMemberCount chatId
+    (tg:call "getChatMemberCount" (& chat_id (chatId)))
 )
+
+;; Returns the largest photo from a list of photos.
+;; @param {list[PhotoSize]} photoList
+;; @returns {PhotoSize}
+(def-fn tg:largestPhoto photoList
+    (array:last (photoList))
+)
+
+;; Returns information about a file.
+;; @param { string | {file_id: number} } file
+;; @returns {File}
+(def-fn tg:getFile file
+    (when (eq "string" (typeof (file)))
+        (ret (tg:call "getFile" (& file_id (file))))
+    )
+    (tg:getFile (file.file_id))
+)
+
+
+;; Returns a URL to a file from the Telegram API.
+;; WARNING: This exposes the bot's token, use it internally only.
+;; @param {string|File} file
+;; @returns {string}
+(def-fn tg:fileUrl file
+    (when (eq "string" (typeof (file)))
+        (ret "https://api.telegram.org/file/bot(local.tgToken)/(file)")
+    )
+    (tg:fileUrl (file.file_path))
+)
+
+
+;; Downloads a file from the Telegram API.
+;; @param {string|File} file
+;; @returns {string}
+(def-fn tg:downloadFile file
+    (when (eq "string" (typeof (file)))
+        (ret (http:get "https://api.telegram.org/file/bot(local.tgToken)/(file)"))
+    )
+    (tg:downloadFile (file.file_path))
+)
+
+;; type File : obj[
+;;      file_id: str
+;;      file_unique_id: str
+;;      file_size: int
+;;      file_path: str
+;;  ]
+
+;; type PhotoSize : obj[
+;;      file_id: str
+;;      file_unique_id: str
+;;      width: int
+;;      height: int
+;;      file_size: int
+;;  ]
+
+;; type Document : obj[
+;;      file_name: str
+;;      mime_type: str
+;;      file_id: str
+;;      file_unique_id: str
+;;      file_size: int
+;;  ]
