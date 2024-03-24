@@ -5,18 +5,16 @@
 ))
 
 ;; Sets the bot token.
-;; @param {string} value
-(def-fn tg:setToken value
-    (set local.tgToken (value))
+;; @param {string} token
+(def-fn tg:config token
+    (set local.tgToken (token))
 )
-
 
 ;; Registers a handler for the message event.
 ;; @param { (from, chat, message) => void } handler
 (def-fn tg:onMessage callback
     (set local.tgHandlers.message (callback))
 )
-
 
 ;; Executes an API call.
 ;; @param {string} methodName
@@ -152,6 +150,16 @@
 ;; @returns {Message}
 (def-fn tg:sendDocument chatId document caption=null replyId=null
     (tg:call "sendDocument" (& chat_id (chatId) document (document) parse_mode "HTML" caption (caption) reply_to_message_id (replyId)))
+)
+
+;; Sends a voice to a chat. The `voice` parameter can be a file_id, a URL, a {name:str, data:str} or a {path: str} object.
+;; @param {number|string} chatId
+;; @param {string} voice
+;; @param {string} [caption]
+;; @param {number} [replyId]
+;; @returns {Message}
+(def-fn tg:sendVoice chatId voice caption=null replyId=null
+    (tg:call "sendVoice" (& chat_id (chatId) voice (voice) parse_mode "HTML" caption (caption) reply_to_message_id (replyId)))
 )
 
 ;; Sends a location to a chat.
@@ -333,6 +341,14 @@
 
 ;; type Document : obj[
 ;;      file_name: str
+;;      mime_type: str
+;;      file_id: str
+;;      file_unique_id: str
+;;      file_size: int
+;;  ]
+
+;; type Voice : obj[
+;;      duration: int
 ;;      mime_type: str
 ;;      file_id: str
 ;;      file_unique_id: str

@@ -1,7 +1,224 @@
 
-;; Requires:
-;; - config.openai.key
-;; - config.openai.orgid
+(set key "")
+(set orgid null)
+
+;; Set the OpenAI API key and organization ID (optional).
+;; @param {string} key
+;; @param {string} [orgid]
+(def-fn openai:config key orgid=null
+    (set local.key (key))
+    (set local.orgid (orgid))
+)
+
+;; Returns the transcript of an audio file. Uses the `whisper-1` model by default.
+;; @param { string | {path:str} | {name:str, data:str} } audio
+;; @param {string} [model="whisper-1"]
+;; @param {number} [temperature=0.0]
+;; @returns {string}
+(def-fn openai:transcript audio model="whisper-1" temperature=0.0
+
+    (http:auth "bearer" (local.key))
+    (when (local.orgid)
+        (http:header "OpenAI-Organization: (local.orgid)"))
+
+    (set result (http:fetch "POST" "https://api.openai.com/v1/audio/transcriptions" (&
+        file (audio)
+        model (model)
+        temperature (float (temperature))
+    )))
+
+    (when (ne 200 (http:code))
+        (trace "[ERROR] (datetime:now): openai:transcript (http:code): (result)")
+        (throw "Unable to get transcript: (http:code) (result.error.message)")
+    )
+
+    (result.text)
+)
+
+;; Returns the translation of an audio file into english. Uses the `whisper-1` model by default.
+;; @param { string | {path:str} | {name:str, data:str} } audio
+;; @param {string} [model="whisper-1"]
+;; @param {number} [temperature=0.0]
+;; @returns {string}
+(def-fn openai:translation audio model="whisper-1" temperature=0.0
+
+    (http:auth "bearer" (local.key))
+    (when (local.orgid)
+        (http:header "OpenAI-Organization: (local.orgid)"))
+
+    (set result (http:fetch "POST" "https://api.openai.com/v1/audio/translations" (&
+        file (audio)
+        model (model)
+        temperature (float (temperature))
+    )))
+
+    (when (ne 200 (http:code))
+        (trace "[ERROR] (datetime:now): openai:translation (http:code): (result)")
+        (throw "Unable to get translation: (http:code) (result.error.message)")
+    )
+
+    (result.text)
+)
+
+;; Converts text to speech.
+;; @param {string} input - The text to convert to speech.
+;; @param {string} [voice="nova"] - Voices: `alloy`, `echo`, `fable`, `onyx`, `nova`, and `shimmer`.
+;; @param {string} [model="tts-1"] - TTS models: `tts-1` and `tts-1-hd`.
+;; @param {string} [response_format="opus"] - Response formats: `mp3`, `opus`, `aac`, `flac`, `wav`, and `pcm`.
+;; @returns {string}
+(def-fn openai:speech input voice="nova" model="tts-1" response_format="opus"
+
+    (http:auth "bearer" (local.key))
+    (when (local.orgid)
+        (http:header "OpenAI-Organization: (local.orgid)"))
+
+    (set result (http:post "https://api.openai.com/v1/audio/speech" (json:stringify (&
+        model (model)
+        input (input)
+        voice (voice)
+        response_format (response_format)
+        speed 1.0
+    ))))
+
+    (when (ne 200 (http:code))
+        (set result (json:parse (result)))
+        (trace "[ERROR] (datetime:now): openai:speech (http:code): (result)")
+        (throw "Unable to get speech: (http:code) (result.error.message)")
+    )
+
+    (result)
+)
+
+;; Creates a new chat request object.
+;; @param {string} [model="gpt-3.5-turbo"] Models: `gpt-4`, `gpt-4-turbo-preview`, and `gpt-3.5-turbo`.
+;; @param {string} [response_type=null] Response types: `null`, `json_object`.
+;; @param {object} [functions=null] A list of functions to call.
+;; @param {number} [temperature=0.25] The randomness of the response.
+;; @returns {object}
+(def-fn openai:chat model="gpt-3.5-turbo" response_type=null functions=null temperature="0.25"
+
+    (set chat (&
+        model (model)
+        temperature (float (temperature))
+        top_p 0.5
+        messages (#)
+    ))
+
+    (when (response_type)
+        (set chat.response_format (& type (response_type))))
+
+    (when (functions)
+        (set chat.functions (functions))
+        (set chat.function_call "auto")
+    )
+
+    (chat)
+)
+
+;; Adds a user message to the chat request object.
+;; @param {object} chat - The chat request object.
+;; @param {string|array[string]} text - The message to add.
+(def-fn openai:message chat text
+    (if (eq "array" (typeof (text)))
+        (for content (text)
+            (array:push (chat.messages) (& role "user" content (content))))
+    else
+        (array:push (chat.messages) (& role "user" content (text)))
+    )
+)
+
+;; Adds a system message to the chat request object.
+;; @param {object} chat - The chat request object.
+;; @param {string|array[string]} text - The message to add.
+(def-fn openai:rule chat text
+    (if (eq "array" (typeof (text)))
+        (for content (text)
+            (array:push (chat.messages) (& role "system" content (content))))
+    else
+        (array:push (chat.messages) (& role "system" content (text)))
+    )
+)
+
+;; Adds a function response message to the chat request object.
+;; @param {object} chat - The chat request object.
+;; @param {string} functionName - The name of the function.
+;; @param {string} content - The content of the function response.
+(def-fn openai:functionResponse chat functionName content
+    (array:push (chat.messages (& role "function" content (content) name (functionName))))
+)
+
+;; Completes the chat request object and returns the response text content.
+;; @param {object} chat - The chat request object.
+;; @returns {string}
+(def-fn openai:complete chat
+
+    (http:auth "bearer" (local.key))
+    (when (local.orgid)
+        (http:header "OpenAI-Organization: (local.orgid)"))
+
+    (set result (http:fetch "POST" "https://api.openai.com/v1/chat/completions" (json:stringify (chat))))
+    (when (ne 200 (http:code))
+        (trace "[ERROR] (datetime:now): openai:complete (http:code): (result)")
+        (throw "Unable to complete chat: (http:code) (result.error.message)")
+    )
+
+    (for choice (result.choices)
+
+        ;; Skip messages from the assistant.
+        (when (ne "assistant" (choice.message.role))
+            (continue))
+
+        ;; Process function calls.
+        (when (eq "function_call" (choice.finish_reason))
+
+            ;; Remove function call from functions list for next completion.
+            (array:remove (chat.functions) (findIndex i (chat.functions) (eq (choice.message.function_call.name) (i.name))))
+
+            ;; Remove `functions` and `function_call` from request if no more functions are left.
+            (when-not (len (chat.functions))
+            	(map:remove (chat) "functions")
+            	(map:remove (chat) "function_call")
+            )
+
+            ;; Execute function and store the response.
+            (set functionResponse
+                ((local.functions.(choice.message.function_call.name)) (json:parse (choice.message.function_call.arguments))))
+
+            ;; Add the current message along with the function response to the chat.
+            (array:push (chat.messages) (choice.message))
+            (openai:functionResponse (chat) (i.message.function_call.name) (json:stringify (functionResponse)))
+
+            (ret (openai:complete (chat)))
+        )
+
+        ;; Check if finish reason was not natural stop.
+        (when (ne "stop" (choice.finish_reason))
+            (trace "[ERROR] (datetime:now): openai:complete: finish_reason=(choice.finish_reason), usage: (result.usage)")
+            (throw "Finish reason: (choice.finish_reason)")
+        )
+
+        ;; Add message to the chat and return content.
+        (array:push (chat.messages) (choice.message))
+        (ret (choice.message.content))
+    )
+
+    (trace "[ERROR] (datetime:now): openai:complete: unable to complete chat, result: (result)")
+    (throw "Unable to complete chat")
+)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 (set functions (&
 ))
@@ -9,148 +226,61 @@
 (set fnDescriptors (&
 ))
 
-(def openai::model::gpt3 "gpt-3.5-turbo-0613")
-(def openai::model::gpt3_xl "gpt-3.5-turbo-16k-0613")
-(def openai::model::gpt4 "gpt-4")
-(def openai::model::gpt4_xl "gpt-4-32k")
-(def openai::model::gpt4_turbo "gpt-4-1106-preview")
 
-(def-fn openai::message role name content=null
-	(if (content)
-		(& role (role) content (content) name (name) )
-	else
-		(& role (role) content (name) )
-	)
+
+(def-fn openai:string description=""
+    (&
+        type "string"
+        description (description)
+    )
 )
 
-(def-fn openai::string description=""
-	(&
-		type "string"
-		description (description)
-	)
+(def-fn openai:integer description=""
+    (&
+        type "integer"
+        description (description)
+    )
 )
 
-(def-fn openai::integer description=""
-	(&
-		type "integer"
-		description (description)
-	)
+(def-fn openai:boolean description=""
+    (&
+        type "boolean"
+        description (description)
+    )
 )
 
-(def-fn openai::boolean description=""
-	(&
-		type "boolean"
-		description (description)
-	)
+(def-fn openai:number description=""
+    (&
+        type "number"
+        description (description)
+    )
 )
 
-(def-fn openai::number description=""
-	(&
-		type "number"
-		description (description)
-	)
+(def-fn openai:enum options description=""
+    (&
+        type "string"
+        description (description)
+        enum (options)
+    )
 )
 
-(def-fn openai::enum options description=""
-	(&
-		type "string"
-		description (description)
-		enum (options)
-	)
+(def-fn openai:getFunctions
+    (map:values (local.fnDescriptors))
 )
 
-(def-fn openai::getFunctions
-	(map::values (local.fnDescriptors))
-)
+(def-fn openai:function name description parameterList requiredList functionRef
+    (set local.functions.(name) (functionRef))
 
-(def-fn openai::function name description parameterList requiredList functionRef
-	(set local.functions.(name) (functionRef))
+    (set fdef (&
+        name (name)
+        description (description)
+        parameters (&
+            type "object"
+            properties (parameterList)
+            required (requiredList)
+        )
+    ))
 
-	(set fdef (&
-		name (name)
-		description (description)
-		parameters (&
-			type "object"
-			properties (parameterList)
-			required (requiredList)
-		)
-	))
-
-	(set local.fnDescriptors.(name) (fdef))
-	(fdef)
-)
-
-(def-fn openai::chat::request model messages functions=null temperature="0.25"
-
-	(set o (&
-		model (model)
-		temperature (float (temperature))
-		top_p 0.5
-		messages (messages)
-	))
-
-	(when (functions)
-		(set o.functions (functions))
-		(set o.function_call "auto")
-	)
-
-	(o)
-)
-
-(def-fn openai::chat::complete chatRequest
-
-	(http::clear)
-	(http::auth "bearer" (config.openai.key))
-	(http::header "OpenAI-Organization: (config.openai.orgid)")
-
-	;;(echo "\e[36mREQUEST:\e[0m")
-	;;(echo (utils::json::prettify (chatRequest.messages)))
-
-	(set res (http::fetch "POST" "https://api.openai.com/v1/chat/completions" (utils::json::stringify (chatRequest))))
-	(when (ne 200 (http::code))
-		(throw "OpenAI returned code (http::code) res=(res)"))
-
-	;;(echo "\e[35mRESPONSE:\e[0m")
-	;;(echo (utils::json::prettify (res.choices)))
-
-	(for i (res.choices)
-		(when (ne "assistant" (i.message.role))
-			(continue))
-
-		(when (eq "function_call" (i.finish_reason))
-
-			;; Remove function call from functions list for next completion.
-			;(array::remove (chatRequest.functions) (findIndex j (chatRequest.functions) (eq (i.message.function_call.name) (j.name))))
-
-			;; Remove `functions` and `function_call` from request if no more functions are left.
-			;(when (eq 0 (array::length (chatRequest.functions)))
-			;	(map::remove (chatRequest) "functions")
-			;	(map::remove (chatRequest) "function_call")
-			;)
-
-			(set fdata
-				((local.functions.(i.message.function_call.name)) (utils::json::parse (i.message.function_call.arguments)))
-			)
-
-			(echo "RES \e[94m(fdata)\e[0m")
-
-			(array::push (chatRequest.messages) (i.message))
-			(array::push (chatRequest.messages) (openai::message "function" (i.message.function_call.name) (utils::json::stringify (fdata))))
-
-			(ret (openai::chat::complete (chatRequest)))
-		)
-
-		(when (ne "stop" (i.finish_reason))
-			(throw "Finish reason: (i.finish_reason) | Usage: (res.usage)"))
-
-		(try
-			(array::push (chatRequest.messages) (i.message))
-			(ret (i.message.content))
-
-		catch
-			(throw "Unable to parse input JSON: (i.message.content)")
-		)
-	)
-
-	(throw "No usable response from OpenAI")
+    (set local.fnDescriptors.(name) (fdef))
+    (fdef)
 )
