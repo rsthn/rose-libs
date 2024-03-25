@@ -33,8 +33,6 @@
     (when-not (data.ok)
         (throw (data.description)))
 
-    (trace "tg:call (methodName): " (data.result))
-    ; data.description
     (data.result)
 )
 
