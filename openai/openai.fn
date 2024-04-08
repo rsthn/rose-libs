@@ -17,19 +17,19 @@
 ;; @returns {string}
 (def-fn openai:transcript audio model="whisper-1" temperature=0.0
 
-    (http:auth "bearer" (local.key))
+    (request:auth "bearer" (local.key))
     (when (local.orgid)
-        (http:header "OpenAI-Organization: (local.orgid)"))
+        (request:header "OpenAI-Organization: (local.orgid)"))
 
-    (set result (http:fetch "POST" "https://api.openai.com/v1/audio/transcriptions" (&
+    (set result (request:fetch "POST" "https://api.openai.com/v1/audio/transcriptions" (&
         file (audio)
         model (model)
         temperature (float (temperature))
     )))
 
-    (when (ne 200 (http:code))
-        (trace "[ERROR] (datetime:now): openai:transcript (http:code): (result)")
-        (throw "Unable to get transcript: (http:code) (result.error.message)")
+    (when (ne 200 (request:code))
+        (trace "[ERROR] (datetime:now): openai:transcript (request:code): (result)")
+        (throw "Unable to get transcript: (request:code) (result.error.message)")
     )
 
     (result.text)
@@ -42,19 +42,19 @@
 ;; @returns {string}
 (def-fn openai:translation audio model="whisper-1" temperature=0.0
 
-    (http:auth "bearer" (local.key))
+    (request:auth "bearer" (local.key))
     (when (local.orgid)
-        (http:header "OpenAI-Organization: (local.orgid)"))
+        (request:header "OpenAI-Organization: (local.orgid)"))
 
-    (set result (http:fetch "POST" "https://api.openai.com/v1/audio/translations" (&
+    (set result (request:fetch "POST" "https://api.openai.com/v1/audio/translations" (&
         file (audio)
         model (model)
         temperature (float (temperature))
     )))
 
-    (when (ne 200 (http:code))
-        (trace "[ERROR] (datetime:now): openai:translation (http:code): (result)")
-        (throw "Unable to get translation: (http:code) (result.error.message)")
+    (when (ne 200 (request:code))
+        (trace "[ERROR] (datetime:now): openai:translation (request:code): (result)")
+        (throw "Unable to get translation: (request:code) (result.error.message)")
     )
 
     (result.text)
@@ -68,11 +68,11 @@
 ;; @returns {string}
 (def-fn openai:speech input voice="nova" model="tts-1" response_format="opus"
 
-    (http:auth "bearer" (local.key))
+    (request:auth "bearer" (local.key))
     (when (local.orgid)
-        (http:header "OpenAI-Organization: (local.orgid)"))
+        (request:header "OpenAI-Organization: (local.orgid)"))
 
-    (set result (http:post "https://api.openai.com/v1/audio/speech" (json:stringify (&
+    (set result (request:post "https://api.openai.com/v1/audio/speech" (json:stringify (&
         model (model)
         input (input)
         voice (voice)
@@ -80,10 +80,10 @@
         speed 1.0
     ))))
 
-    (when (ne 200 (http:code))
+    (when (ne 200 (request:code))
         (set result (json:parse (result)))
-        (trace "[ERROR] (datetime:now): openai:speech (http:code): (result)")
-        (throw "Unable to get speech: (http:code) (result.error.message)")
+        (trace "[ERROR] (datetime:now): openai:speech (request:code): (result)")
+        (throw "Unable to get speech: (request:code) (result.error.message)")
     )
 
     (result)
@@ -152,14 +152,14 @@
 ;; @returns {string}
 (def-fn openai:complete chat
 
-    (http:auth "bearer" (local.key))
+    (request:auth "bearer" (local.key))
     (when (local.orgid)
-        (http:header "OpenAI-Organization: (local.orgid)"))
+        (request:header "OpenAI-Organization: (local.orgid)"))
 
-    (set result (http:fetch "POST" "https://api.openai.com/v1/chat/completions" (json:stringify (chat))))
-    (when (ne 200 (http:code))
-        (trace "[ERROR] (datetime:now): openai:complete (http:code): (result)")
-        (throw "Unable to complete chat: (http:code) (result.error.message)")
+    (set result (request:fetch "POST" "https://api.openai.com/v1/chat/completions" (json:stringify (chat))))
+    (when (ne 200 (request:code))
+        (trace "[ERROR] (datetime:now): openai:complete (request:code): (result)")
+        (throw "Unable to complete chat: (request:code) (result.error.message)")
     )
 
     (for choice (result.choices)

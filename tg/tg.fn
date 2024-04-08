@@ -24,15 +24,17 @@
 
     (set data
         (if (data)
-            (http:fetch "POST" "https://api.telegram.org/bot(local.tgToken)/(methodName)" (data))
+            (request:fetch "POST" "https://api.telegram.org/bot(local.tgToken)/(methodName)" (data))
         else
-            (http:fetch "GET" "https://api.telegram.org/bot(local.tgToken)/(methodName)")
+            (request:fetch "GET" "https://api.telegram.org/bot(local.tgToken)/(methodName)")
         )
     )
 
     (when-not (data.ok)
         (throw (data.description)))
 
+    (trace "tg:call (methodName): " (data.result))
+    ; data.description
     (data.result)
 )
 
@@ -65,7 +67,7 @@
     (set webhookConfig (&
         url (url)
         ip_address (webhookConfig.ip_address)
-        max_connections (or (webhookConfig.max_connections) 40)
+        max_connections (or (webhookConfig.max_connections) 24)
         allowed_updates (or (webhookConfig.allowed_updates) (#))
         drop_pending_updates true
         secret_token (secret_token)
@@ -104,10 +106,25 @@
 ;; Sends a message to a chat ID.
 ;; @param {number|string} chatId
 ;; @param {string} text
-;; @param {number} [replyId]
+;; @param {number} [reply_to_message_id]
+;; @param {number} [message_thread_id]
 ;; @returns {Message}
-(def-fn tg:sendMessage chatId message replyId=null
-    (tg:call "sendMessage" (& chat_id (chatId) text (message) parse_mode "HTML" reply_to_message_id (replyId)))
+(def-fn tg:sendMessage chatId text reply_to_message_id=null message_thread_id=null
+    (tg:call "sendMessage" (& chat_id (chatId) text (text) parse_mode "HTML" 
+        reply_to_message_id (reply_to_message_id)
+        message_thread_id (message_thread_id)
+    ))
+)
+
+;; Edits a message in a chat.
+;; @param {number|string} chat_id
+;; @param {number} [message_id]
+;; @param {string} text
+;; @returns {Message}
+(def-fn tg:editMessageText chat_id message_id text
+    (tg:call "editMessageText" (& 
+        chat_id (chat_id) message_id (message_id) text (text) parse_mode "HTML" 
+    ))
 )
 
 
@@ -317,7 +334,7 @@
 ;; @returns {string}
 (def-fn tg:downloadFile file
     (when (eq "string" (typeof (file)))
-        (ret (http:get "https://api.telegram.org/file/bot(local.tgToken)/(file)"))
+        (ret (request:get "https://api.telegram.org/file/bot(local.tgToken)/(file)"))
     )
     (tg:downloadFile (file.file_path))
 )
