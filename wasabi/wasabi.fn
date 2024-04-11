@@ -29,7 +29,7 @@
 ;; @returns {string}
 (def-fn private process-response data
     (set local.LAST_ERROR "")
-    (when (eq (request:code) 200) (ret null))
+    (when (eq? (request:code) 200) (ret null))
     (set data (xml:simplify (xml:parse (data))))
     (set local.LAST_ERROR (data.Error.Code.0))
     (local.LAST_ERROR)
@@ -126,7 +126,7 @@
     (request:header "Authorization: AWS (local.ACCESS_KEY_ID):(signature)")
 
     (request:get "https://(bucketName).s3.wasabisys.com/(filePath)")
-    (when (ne 200 (request:code))
+    (when (ne? 200 (request:code))
         (throw (request:code)))
 
     (request:data)
@@ -177,10 +177,10 @@
             (& lastModified (datetime:parse (i.LastModified.0)) path (i.Key.0) size (i.Size.0)))
     )))
 
-    (when (isnull (res)) (set res (#)))
-    (when (and (eqq (wasTruncated) "true") (ne 0 (res.length)) (lt (pageNumber) 100))
-        (set lastKey ((array::last (res)).name))
-        (array::append (res) (wasabi:list (bucketName) (folderPath) (lastKey) (+ 1 (pageNumber))))
+    (when (null? (res)) (set res (#)))
+    (when (and (eqq? (wasTruncated) "true") (ne? 0 (res.length)) (lt? (pageNumber) 100))
+        (set lastKey ((array:last (res)).name))
+        (array:append (res) (wasabi:list (bucketName) (folderPath) (lastKey) (+ 1 (pageNumber))))
     )
 
     (res)
@@ -210,10 +210,10 @@
             (& lastModified (datetime:parse (i.LastModified.0)) path (i.Key.0)))
     )))
 
-    (when (isnull (res)) (set res (#)))
-    (when (and (eqq (wasTruncated) "true") (ne 0 (res.length)) (lt (pageNumber) 100))
-        (set lastKey ((array::last (res)).name))
-        (array::append (res) (wasabi:list-folders (bucketName) (folderPath) (lastKey) (+ 1 (pageNumber))))
+    (when (null? (res)) (set res (#)))
+    (when (and (eqq? (wasTruncated) "true") (ne? 0 (res.length)) (lt? (pageNumber) 100))
+        (set lastKey ((array:last (res)).name))
+        (array:append (res) (wasabi:list-folders (bucketName) (folderPath) (lastKey) (+ 1 (pageNumber))))
     )
 
     (res)
@@ -256,7 +256,7 @@
     (request:header "Authorization: AWS (local.ACCESS_KEY_ID):(signature)")
 
     (request:head "https://(bucketName).s3.wasabisys.com/(filePath)")
-    (when (ne 200 (request:code)) (ret null))
+    (when (ne? 200 (request:code)) (ret null))
 
     (request:headers."content-length")
 )
@@ -302,7 +302,7 @@
     (when (process-response (request:put "https://(bucketName).s3.wasabisys.com/(filePath)?partNumber=(+ 1 (partsList.length))&uploadId=(uploadId)" (data)))
         (throw (local.LAST_ERROR)))
 
-    (array::push (partsList) (&
+    (array:push (partsList) (&
         partNumber (+ 1 (partsList.length))
         etag ((request:headers).etag)
     ))
