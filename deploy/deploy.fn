@@ -1,187 +1,191 @@
 ;;
-;;	Deployment Utility
+;;  Deployment Utility
 ;;
 
-; Local variables.
-(set vars (&
-	storage (&)
-	cwd (#)
-))
+;; Local variables.
+(set vars {
+    storage {}
+    cwd []
+})
 
-(set state (# DEF))
+(set state [ "DEF" ])
 (set lineno 0)
 (set value "")
 
-; Returns an ANSI escape sequence for the specified color code.
+;; Returns an ANSI escape sequence for the specified color code.
 (def-fn clr value
-	"\x1B[(value)m")
+    "\x1B[(value)m")
 
-; Expands the `value` variable of the local scope, returns `def-value` if `value` is empty.
+;; Expands the `value` variable of the local scope, returns `def-value` if `value` is empty.
 (def-fn val def-value
-	(? (eq "" (local.value))
-		(def-value)
-		(expand (local.value) (local.vars))))
+    (? (eq? "" (local.value))
+        (def-value)
+        (expand (local.value) (local.vars))))
 
-; Interprets a command.
+;; Interprets a command.
 (def-fn interpret cmd
 
-	(switch (upper (cmd))
+    (switch (upper (cmd))
 
-		case ECHO
-			(echo (val ""))
+        case ECHO
+            (echo (val ""))
 
-		case PUTENV
-			(utils::putenv (val ""))
+        case PUTENV
+            (env:set (val ""))
 
-		case LOAD:STRICT
-			(set value (val ".config"))
-			(when-not (path::exists (value)) (throw "Input file (value) not found."))
+        case LOAD:STRICT
+            (set value (val ".config"))
+            (when-not (path:exists (value))
+                (throw "Input file (value) not found."))
 
-		case LOAD
-			(set value (val ".config"))
-			(when (path::exists (value)) (map::assign (local.vars.storage) (utils::json::parse (file::read (value)))))
+        case LOAD
+            (set value (val ".config"))
+            (when (path:exists (value))
+                (map:assign (local.vars.storage) (json:parse (file:read (value)))))
 
-		case STORE
-			(set value (val ".config"))
-			(file::write (value) (utils::json::prettify (local.vars.storage)))
+        case STORE
+            (set value (val ".config"))
+            (file:write (value) (json:dump (local.vars.storage)))
 
-		case EXEC
-			(set local.vars.errorlevel (utils::exec (val "")))
+        case EXEC
+            (set local.vars.errorlevel (sys:exec (val "")))
 
-		case SHELL
-			(set local.vars.shell (utils::shell (val "")))
+        case SHELL
+            (set local.vars.shell (sys:shell (val "")))
 
-		case CHDIR
-			(path::chdir (val null))
+        case CHDIR
+            (path:chdir (val null))
 
-		case PUSHD
-			(array::push (local.vars.cwd) (path::cwd))
+        case PUSHD
+            (array:push (local.vars.cwd) (path:cwd))
 
-		case POPD
-			(set value (array::pop (local.vars.cwd)))
-			(path::chdir (value))
+        case POPD
+            (set value (array:pop (local.vars.cwd)))
+            (path:chdir (value))
 
-		case MKDIR
-			(dir::create (val null))
+        case MKDIR
+            (dir:create (val null))
 
-		case RMDIR
-			(dir::remove (val null) true)
+        case RMDIR
+            (dir:remove-recursive (val null))
 
-		case CLEAN
-			(for i (dir::files (val null))
-                (file::remove (i.path)))
+        case CLEAN
+            (for i (dir:files (val null))
+                (file:remove (i.path)))
 
-		case DEL
-			(file::remove (val ""))
+        case DEL
+            (file:remove (val ""))
 
-		case DIRCOPY
-			(dir::copy (local.vars.r0) (val null))
+        case DIRCOPY
+            (dir:copy (local.vars.r0) (val null))
 
-		case DIRCOPY:FILES
-			(dir::copy (local.vars.r0) (val null) false)
+        case DIRCOPY:FILES
+            (dir:copy (local.vars.r0) (val null) false)
 
-		case COPY
-			(file::copy (local.vars.r0) (val null))
+        case COPY
+            (file:copy (local.vars.r0) (val null))
 
-		case REPLACE
-			(set value (val null))
-			(file::write (value) (replace (local.vars.r0) (local.vars.r1) (file::read (value))))
+        case REPLACE
+            (set value (val null))
+            (file:write (value) (str:replace (local.vars.r0) (local.vars.r1) (file:read (value))))
 
-		case READ
-			(set value (val null))
-			(set local.vars.r0 (file::read (value)))
+        case READ
+            (set value (val null))
+            (set local.vars.r0 (file:read (value)))
 
-		case WRITE
-			(set value (val null))
-			(file::write (value) (local.vars.r0))
+        case WRITE
+            (set value (val null))
+            (file:write (value) (local.vars.r0))
 
-		case APPEND
-			(set value (val null))
-			(file::append (value) (local.vars.r0))
+        case APPEND
+            (set value (val null))
+            (file:append (value) (local.vars.r0))
 
-		case STOP
-			(throw "@STOP")
+        case STOP
+            (throw "@STOP")
 
-		case IF
-			(if (val false)
-				(array::push (local.state) EXEC-IF)
-			else
-				(array::push (local.state) FIND-ELSE))
+        case IF
+            (if (val false)
+                (array:push (local.state) "EXEC-IF")
+            else
+                (array:push (local.state) "FIND-ELSE"))
 
-		case ELIF
-			(throw "Unexpected ELIF, current state: (array::last (local.state))")
-		case ELSE
-			(throw "Unexpected ELSE, current state: (array::last (local.state))")
-		case END-IF
-			(throw "Unexpected END-IF, current state: (array::last (local.state))")
+        case ELIF
+            (throw "Unexpected ELIF, current state: (array:last (local.state))")
 
-		default
-			(set local.vars.(cmd) (val ""))
-	)
+        case ELSE
+            (throw "Unexpected ELSE, current state: (array:last (local.state))")
+
+        case END-IF
+            (throw "Unexpected END-IF, current state: (array:last (local.state))")
+
+        default
+            (set local.vars.(cmd) (val ""))
+    )
 )
 
-; Executes a deployment file.
+;; Executes a deployment file.
 (def-fn execute srcFile
 
-    (set src (path::resolve (srcFile)))
-    (when-not (path::exists (src)) (throw "Source file not found."))
+    (set src (path:resolve (srcFile)))
+    (when-not (path:exists (src))
+        (throw "Source file not found."))
 
-    (set srcFile (path::basename (src)))
-    (set src (path::dirname (src)))
-
-    (path::chdir (src))
+    (set srcFile (path:basename (src)))
+    (set src (path:dirname (src)))
+    (path:chdir (src))
 
     (try
-        (for line (trim (split "\n" (file::read (srcFile))))
+        (for line (map val (split "\n" (file:read (srcFile))) (trim (val)))
 
             (inc local.lineno)
 
-            (when (or (eq "" (line)) (starts-with "#" (line)))
+            (when (or (eq? "" (line)) (starts-with? "#" (line)))
                 (continue))
 
-            (set x (re::match `/^(.+?)(\s.+)?$/` (line)))
+            (set x (re:match `/^(.+?)(\s.+)?$/` (line)))
 
             (set cmd (x.1))
             (set local.value (trim (x.2)))
 
-            (switch (array::last (local.state))
+            (switch (array:last (local.state))
 
-                case DEF
+                case "DEF"
                     (interpret (cmd))
 
-                case EXEC-IF
+                case "EXEC-IF"
                     (switch (upper (cmd))
-                        case ELSE
-                            (array::pop (local.state))
-                            (array::push (local.state) FIND-END-IF)
-                        case END-IF
-                            (array::pop (local.state))
+                        case "ELSE"
+                            (array:pop (local.state))
+                            (array:push (local.state) "FIND-END-IF")
+                        case "END-IF"
+                            (array:pop (local.state))
                         default
                             (interpret (cmd))
                     )
 
-                case FIND-ELSE
+                case "FIND-ELSE"
                     (switch (upper (cmd))
-                        case IF
-                            (array::push (local.state) FIND-END-IF)
-                        case ELIF
+                        case "IF"
+                            (array:push (local.state) "FIND-END-IF")
+                        case "ELIF"
                             (if (val false)
-                                (array::pop (local.state))
-                                (array::push (local.state) EXEC-IF)
+                                (array:pop (local.state))
+                                (array:push (local.state) "EXEC-IF")
                             )
-                        case ELSE
-                            (array::pop (local.state))
-                            (array::push (local.state) EXEC-IF)
-                        case END-IF
-                            (array::pop (local.state))
+                        case "ELSE"
+                            (array:pop (local.state))
+                            (array:push (local.state) "EXEC-IF")
+                        case "END-IF"
+                            (array:pop (local.state))
                     )
 
-                case FIND-END-IF
+                case "FIND-END-IF"
                     (switch (upper (cmd))
-                        case IF
-                            (array::push (local.state) FIND-END-IF)
-                        case END-IF
-                            (array::pop (local.state))
+                        case "IF"
+                            (array:push (local.state) "FIND-END-IF")
+                        case "END-IF"
+                            (array:pop (local.state))
                     )
             )
         )
