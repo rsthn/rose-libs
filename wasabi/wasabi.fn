@@ -180,20 +180,22 @@
 ;; @param {string} bucketName: Name of the bucket to upload the file to.
 ;; @param {string} filePath: The target path (within the bucket).
 ;; @param {string} sourceFilePath: File to upload.
-;; @param {string} contentType: Content type of the data.
+;; @param {int} chunk_size: Size of the chunks to upload (default is 16 MB).
 ;; @returns {bool}
-(def-fn wasabi:upload-file bucketName filePath sourceFilePath contentType="application/octet-stream"
+(def-fn wasabi:upload-file bucketName filePath sourceFilePath chunk_size=16777216
+
+    (when-not (path:exists (sourceFilePath))
+        (throw "File does not exist"))
 
     (set file_size (file:size (sourceFilePath)))
     (when-not (file_size)
-        (ret false))
+        (throw "File is empty"))
 
-    (set chunk_size (* 32 1048576))
     (set sth (stream:open (sourceFilePath)))
 
     (set uploadId (wasabi:multipart-initiate (bucketName) (filePath)))
-    (echo "(bucketName) (filePath) | uploadId: (uploadId)")
     (set partsList [])
+    (trace "[INFO] [(datetime:now)] multipart upload bucketName=(bucketName), filePath=(filePath), uploadId=(uploadId)")
 
     (set progressHandler (local.PROGRESS_HANDLER))
     (set local.PROGRESS_HANDLER null)
@@ -448,7 +450,7 @@
         "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
     ])
 
-    (set xmlData (str
+    (set xmlData (concat
         "<CompleteMultipartUpload>"
         (join (map i (partsList)
             "<Part><PartNumber>(i.partNumber)</PartNumber><ETag>(i.etag)</ETag></Part>"
