@@ -3,6 +3,7 @@
 
 (set ACCESS_KEY_ID (config.wasabi.accessKeyId))
 (set SECRET_ACCESS_KEY (config.wasabi.secretAccessKey))
+(set PROGRESS_HANDLER null)
 (set LAST_ERROR "")
 
 
@@ -168,25 +169,53 @@
         (throw (local.LAST_ERROR)))
 )
 
+;; Sets the progress handler for the next upload or download operation.
+;; @param {fn} progressHandler: Function accepting two arguments `percent` and `total`.
+;; @returns {void}
+(def-fn wasabi:progress-handler progressHandler
+    (set local.PROGRESS_HANDLER (progressHandler))
+)
+
 ;; Uploads a file.
 ;; @param {string} bucketName: Name of the bucket to upload the file to.
 ;; @param {string} filePath: The target path (within the bucket).
 ;; @param {string} sourceFilePath: File to upload.
 ;; @param {string} contentType: Content type of the data.
-;; @returns {void}
+;; @returns {bool}
 (def-fn wasabi:upload-file bucketName filePath sourceFilePath contentType="application/octet-stream"
-    (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set signature (wasabi:sign `PUT\n\n{contentType}\n{requestDate}\n/{bucketName}/{filePath}`))
 
-    (request:headers [
-        "Content-Type: (contentType)"
-        "Date: (requestDate)"
-        "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
-    ])
+    (set file_size (file:size (sourceFilePath)))
+    (when-not (file_size)
+        (ret false))
 
-    (request:input-file (sourceFilePath))
-    (when (process-response (request:put "https://s3.wasabisys.com/(bucketName)/(filePath)"))
-        (throw (local.LAST_ERROR)))
+    (set chunk_size (* 32 1048576))
+    (set sth (stream:open (sourceFilePath)))
+
+    (set uploadId (wasabi:multipart-initiate (bucketName) (filePath)))
+    (echo "(bucketName) (filePath) | uploadId: (uploadId)")
+    (set partsList [])
+
+    (set progressHandler (local.PROGRESS_HANDLER))
+    (set local.PROGRESS_HANDLER null)
+
+    (when (progressHandler)
+        ((progressHandler) 0.0 (file_size)))
+
+    (for chunk_offs in (range 0.0 (file_size) (chunk_size))
+        (set chunk (stream:read (sth) (chunk_size)))
+        (wasabi:multipart-upload (bucketName) (filePath) (uploadId) (partsList) (chunk))
+
+        (when (progressHandler)
+            ((progressHandler) (math:fixed (/ (* 100.0 (chunk_offs)) (file_size))) (file_size)))
+    )
+
+    (when (progressHandler)
+        ((progressHandler) 100.0 (file_size)))
+
+    (stream:close (sth))
+    (wasabi:multipart-complete (bucketName) (filePath) (uploadId) (partsList))
+
+    true
 )
 
 
@@ -380,7 +409,7 @@
 ;; @param {string} bucketName: Name of the bucket to create.
 ;; @param {string} filePath: Relative path of the file to create.
 ;; @param {string} uploadId: The upload ID.
-;; @param { [{partNumber:int, etag:string}] } partsList: The list of parts, will be populated by this function.
+;; @param { [{partNumber:int, etag:string}] } partsList: List of parts will be populated by this function.
 ;; @param {string} data: Data to upload.
 ;; @returns {void}
 (def-fn wasabi:multipart-upload bucketName filePath uploadId partsList data
