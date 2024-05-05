@@ -180,9 +180,9 @@
 ;; @param {string} bucketName: Name of the bucket to upload the file to.
 ;; @param {string} filePath: The target path (within the bucket).
 ;; @param {string} sourceFilePath: File to upload.
-;; @param {int} chunk_size: Size of the chunks to upload (default is 16 MB).
+;; @param {int} chunk_size: Size of the chunks to upload (default is 64 MB).
 ;; @returns {bool}
-(def-fn wasabi:upload-file bucketName filePath sourceFilePath chunk_size=16777216
+(def-fn wasabi:upload-file bucketName filePath sourceFilePath chunk_size=67108864
 
     (when-not (path:exists (sourceFilePath))
         (throw "File does not exist"))
