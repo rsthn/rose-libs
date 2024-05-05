@@ -50,13 +50,14 @@
 )
 
 
-;; Verifies if the specified bucket exists.
+;; Verifies if the specified path exists.
 ;; @param {string} bucketName: Name of the bucket.
+;; @param {string} filePath: Relative path to the file.
 ;; @returns {bool}
-(def-fn wasabi:bucket-exists bucketName
+(def-fn wasabi:exists bucketName filePath=""
     (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
     (set contentType "text/plain")
-    (set signature (wasabi:sign `HEAD\n\n{contentType}\n{requestDate}\n/{bucketName}/`))
+    (set signature (wasabi:sign `HEAD\n\n{contentType}\n{requestDate}\n/{bucketName}/{filePath}`))
 
     (request:headers [
         "Content-Type: (contentType)"
@@ -64,7 +65,7 @@
         "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
     ])
 
-    (request:head "https://s3.wasabisys.com/(bucketName)/")
+    (request:head "https://s3.wasabisys.com/(bucketName)/(filePath)")
     (eq? 200 (request:status))
 )
 
@@ -93,9 +94,11 @@
 ;; @returns {void}
 (def-fn wasabi:delete-bucket bucketName
     (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set signature (wasabi:sign `DELETE\n\napplication/x-www-form-urlencoded\n{requestDate}\n/{bucketName}/`))
+    (set contentType "text/plain")
+    (set signature (wasabi:sign `DELETE\n\n{contentType}\n{requestDate}\n/{bucketName}/`))
 
     (request:headers [
+        "Content-Type: (contentType)"
         "Date: (requestDate)"
         "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
     ])
@@ -109,9 +112,11 @@
 ;; @returns { [{created:datetime, name:string}] } List of buckets.
 (def-fn wasabi:list-buckets
     (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set signature (wasabi:sign `GET\n\n\n{requestDate}\n/`))
+    (set contentType "text/plain")
+    (set signature (wasabi:sign `GET\n\n{contentType}\n{requestDate}\n/`))
 
     (request:headers [
+        "Content-Type: (contentType)"
         "Date: (requestDate)"
         "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
     ])
@@ -131,7 +136,7 @@
 
 ;; Creates a new folder.
 ;; @param {string} bucketName: Name of the bucket to create the folder in.
-;; @param {string} folderPath: Relative path of the folder to create.
+;; @param {string} folderPath: Relative path of the folder to create. Do not end with a slash.
 ;; @returns {void}
 (def-fn wasabi:create-folder bucketName folderPath
     (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
@@ -227,7 +232,7 @@
 ;; @returns {string}
 (def-fn wasabi:download-data bucketName filePath
     (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set contentType "application/x-www-form-urlencoded")
+    (set contentType "text/plain")
     (set signature (wasabi:sign `GET\n\n{contentType}\n{requestDate}\n/{bucketName}/{filePath}`))
 
     (request:headers [
@@ -250,7 +255,7 @@
 ;; @returns {bool}
 (def-fn wasabi:download-file bucketName filePath targetFilePath
     (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set contentType "application/x-www-form-urlencoded")
+    (set contentType "text/plain")
     (set signature (wasabi:sign `GET\n\n{contentType}\n{requestDate}\n/{bucketName}/{filePath}`))
 
     (request:headers [
@@ -270,9 +275,11 @@
 ;; @returns { [{lastModified:datetime, path:string, size:int}] } List of files.
 (def-fn wasabi:list bucketName folderPath="" lastKey="" pageNumber=0
     (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set signature (wasabi:sign `GET\n\n\n{requestDate}\n/{bucketName}/`))
+    (set contentType "text/plain")
+    (set signature (wasabi:sign `GET\n\n{contentType}\n{requestDate}\n/{bucketName}/`))
 
     (request:headers [
+        "Content-Type: (contentType)"
         "Date: (requestDate)"
         "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
     ])
@@ -306,9 +313,11 @@
 ;; @returns { [{lastModified:datetime, path:string}] } List of folders.
 (def-fn wasabi:list-folders bucketName folderPath="" lastKey="" pageNumber=0
     (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set signature (wasabi:sign `GET\n\n\n{requestDate}\n/{bucketName}/`))
+    (set contentType "text/plain")
+    (set signature (wasabi:sign `GET\n\n{contentType}\n{requestDate}\n/{bucketName}/`))
 
     (request:headers [
+        "Content-Type: (contentType)"
         "Date: (requestDate)"
         "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
     ])
@@ -350,10 +359,11 @@
 ;; @returns {void}
 (def-fn wasabi:delete bucketName filePath
     (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set contentType "application/x-www-form-urlencoded")
+    (set contentType "text/plain")
     (set signature (wasabi:sign `DELETE\n\n{contentType}\n{requestDate}\n/{bucketName}/{filePath}`))
 
     (request:headers [
+        "Content-Type: (contentType)"
         "Date: (requestDate)"
         "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
     ])
@@ -368,9 +378,11 @@
 ;; @returns {int|null}
 (def-fn wasabi:filesize bucketName filePath
     (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set signature (wasabi:sign `HEAD\n\n\n{requestDate}\n/{bucketName}/{filePath}`))
+    (set contentType "text/plain")
+    (set signature (wasabi:sign `HEAD\n\n{contentType}\n{requestDate}\n/{bucketName}/{filePath}`))
 
     (request:headers [
+        "Content-Type: (contentType)"
         "Date: (requestDate)"
         "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
     ])
@@ -389,10 +401,11 @@
 ;; @returns {string} The upload ID.
 (def-fn wasabi:multipart-initiate bucketName filePath
     (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set signature (wasabi:sign `POST\n\ntext/plain\n{requestDate}\n/{bucketName}/{filePath}?uploads`))
+    (set contentType "text/plain")
+    (set signature (wasabi:sign `POST\n\n{contentType}\n{requestDate}\n/{bucketName}/{filePath}?uploads`))
 
     (request:headers [
-        "Content-Type: text/plain"
+        "Content-Type: (contentType)"
         "Date: (requestDate)"
         "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
     ])
@@ -416,10 +429,11 @@
 ;; @returns {void}
 (def-fn wasabi:multipart-upload bucketName filePath uploadId partsList data
     (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set signature (wasabi:sign `PUT\n\napplication/octet-stream\n{requestDate}\n/{bucketName}/{filePath}?partNumber={+ 1 {partsList.length}}&uploadId={uploadId}`))
+    (set contentType "application/octet-stream")
+    (set signature (wasabi:sign `PUT\n\n{contentType}\n{requestDate}\n/{bucketName}/{filePath}?partNumber={+ 1 {partsList.length}}&uploadId={uploadId}`))
 
     (request:headers [
-        "Content-Type: application/octet-stream"
+        "Content-Type: (contentType)"
         "Date: (requestDate)"
         "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
     ])
@@ -442,10 +456,11 @@
 ;; @returns {void}
 (def-fn wasabi:multipart-complete bucketName filePath uploadId partsList
     (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set signature (wasabi:sign `POST\n\napplication/xml\n{requestDate}\n/{bucketName}/{filePath}?uploadId={uploadId}`))
+    (set contentType "application/xml")
+    (set signature (wasabi:sign `POST\n\n{contentType}\n{requestDate}\n/{bucketName}/{filePath}?uploadId={uploadId}`))
 
     (request:headers [
-        "Content-Type: application/xml"
+        "Content-Type: (contentType)"
         "Date: (requestDate)"
         "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
     ])
@@ -470,10 +485,11 @@
 ;; @returns {void}
 (def-fn wasabi:multipart-cancel bucketName filePath uploadId
     (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set signature (wasabi:sign `DELETE\n\ntext/plain\n{requestDate}\n/{bucketName}/{filePath}?uploadId={uploadId}`))
+    (set contentType "text/plain")
+    (set signature (wasabi:sign `DELETE\n\n{contentType}\n{requestDate}\n/{bucketName}/{filePath}?uploadId={uploadId}`))
 
     (request:headers [
-        "Content-Type: text/plain"
+        "Content-Type: (contentType)"
         "Date: (requestDate)"
         "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
     ])
