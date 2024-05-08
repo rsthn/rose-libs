@@ -1,0 +1,26 @@
+
+;; Runs an HKDF extract operation with the given salt and input keying material (IKM).
+;; @code (`hkdf:extract` <salt> <ikm>)
+(def-fn hkdf:extract salt ikm
+    (crypto:hmac-bin "sha256" (salt) (ikm))
+)
+
+;; Runs an HKDF expand operation with the given pseudo-random key (PRK), info, and hash length (L).
+;; @code (`hkdf:expand` <prk> <info> <L>)
+(def-fn hkdf:expand prk info L
+    (set okm "")
+    (set T "")
+    (repeat n from 1 to (math:ceil (/ (L) 32))
+        (set t (crypto:hmac-bin "sha256" (prk) "(T)(info)(chr (n))"))
+        (append okm (t))
+        (set T (t))
+    )
+    (substr 0 (L) (okm))
+)
+
+;; Returns the HKDF of the given salt, IKM, and info. Output length is L.
+;; @code (`hkdf` <salt> <ikm> <info> [L=32])
+(def-fn hkdf salt ikm info L=32
+    (set prk (hkdf:extract (salt) (ikm)))
+    (hkdf:expand (prk) (info) (L))
+)
