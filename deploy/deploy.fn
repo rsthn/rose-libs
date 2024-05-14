@@ -11,13 +11,18 @@
 (set state [ "DEF" ])
 (set lineno 0)
 (set value "")
+(set buffer "")
 
 ;; Returns an ANSI escape sequence for the specified color code.
 (def-fn clr value
     "\x1B[(value)m")
 
+;; Exports a value into the context variables.
+(def-fn set-var name value
+    (set local.vars.(name) (value)))
+
 ;; Expands the `value` variable of the local scope, returns `def-value` if `value` is empty.
-(def-fn val def-value
+(def-fn val_ def-value
     (? (eq? "" (local.value))
         (def-value)
         (expand (local.value) (local.vars))))
@@ -28,33 +33,38 @@
     (switch (upper (cmd))
 
         case ECHO
-            (echo (val ""))
+            (echo (val_ ""))
 
         case PUTENV
-            (env:set (val ""))
+            (env:set (val_ ""))
 
         case LOAD:STRICT
-            (set value (val ".config"))
+            (set value (val_ ".config"))
             (when-not (path:exists (value))
                 (throw "Input file (value) not found."))
 
         case LOAD
-            (set value (val ".config"))
+            (set value (val_ ".config"))
             (when (path:exists (value))
                 (map:assign (local.vars.storage) (json:parse (file:read (value)))))
 
         case STORE
-            (set value (val ".config"))
+            (set value (val_ ".config"))
             (file:write (value) (json:dump (local.vars.storage)))
 
         case EXEC
-            (set local.vars.errorlevel (sys:exec (val "")))
+            (set local.vars.errorlevel (sys:exec (val_ "")))
+
+        case RUN
+            (set errorlevel (sys:exec (val_ "")))
+            (ne? 0 (errorlevel)
+                (throw "Command failed with exit code: (errorlevel)"))
 
         case SHELL
-            (set local.vars.shell (sys:shell (val "")))
+            (set local.vars.shell (sys:shell (val_ "")))
 
         case CHDIR
-            (path:chdir (val null))
+            (path:chdir (val_ null))
 
         case PUSHD
             (array:push (local.vars.cwd) (path:cwd))
@@ -64,48 +74,48 @@
             (path:chdir (value))
 
         case MKDIR
-            (dir:create (val null))
+            (dir:create (val_ null))
 
         case RMDIR
-            (dir:remove-recursive (val null))
+            (dir:remove-recursive (val_ null))
 
         case CLEAN
-            (for i (dir:files (val null))
+            (for i (dir:files (val_ null))
                 (file:remove (i.path)))
 
         case DEL
-            (file:remove (val ""))
+            (file:remove (val_ ""))
 
         case DIRCOPY
-            (dir:copy (local.vars.r0) (val null))
+            (dir:copy (local.vars.r0) (val_ null))
 
         case DIRCOPY:FILES
-            (dir:copy (local.vars.r0) (val null) false)
+            (dir:copy (local.vars.r0) (val_ null) false)
 
         case COPY
-            (file:copy (local.vars.r0) (val null))
+            (file:copy (local.vars.r0) (val_ null))
 
         case REPLACE
-            (set value (val null))
+            (set value (val_ null))
             (file:write (value) (str:replace (local.vars.r0) (local.vars.r1) (file:read (value))))
 
         case READ
-            (set value (val null))
+            (set value (val_ null))
             (set local.vars.r0 (file:read (value)))
 
         case WRITE
-            (set value (val null))
+            (set value (val_ null))
             (file:write (value) (local.vars.r0))
 
         case APPEND
-            (set value (val null))
+            (set value (val_ null))
             (file:append (value) (local.vars.r0))
 
         case STOP
             (throw "@STOP")
 
         case IF
-            (if (val false)
+            (if (val_ false)
                 (array:push (local.state) "EXEC-IF")
             else
                 (array:push (local.state) "FIND-ELSE"))
@@ -119,8 +129,15 @@
         case END-IF
             (throw "Unexpected END-IF, current state: (array:last (local.state))")
 
+        case BEGIN
+            (set local.buffer "")
+            (array:push (local.state) "BLOCK")
+
+        case END
+            (throw "Unexpected END, current state: (array:last (local.state))")
+
         default
-            (set local.vars.(cmd) (val ""))
+            (set local.vars.(cmd) (val_ ""))
     )
 )
 
@@ -129,14 +146,14 @@
 
     (set src (path:resolve (srcFile)))
     (when-not (path:exists (src))
-        (throw "Source file not found."))
+        (throw "Source file not found: (srcFile)"))
 
     (set srcFile (path:basename (src)))
     (set src (path:dirname (src)))
     (path:chdir (src))
 
     (try
-        (for line (map val (split "\n" (file:read (srcFile))) (trim (val)))
+        (for line (map line (split "\n" (file:read (srcFile))) (trim (line)))
 
             (inc local.lineno)
 
@@ -169,7 +186,7 @@
                         case "IF"
                             (array:push (local.state) "FIND-END-IF")
                         case "ELIF"
-                            (if (val false)
+                            (if (val_ false)
                                 (array:pop (local.state))
                                 (array:push (local.state) "EXEC-IF")
                             )
@@ -186,6 +203,16 @@
                             (array:push (local.state) "FIND-END-IF")
                         case "END-IF"
                             (array:pop (local.state))
+                    )
+
+                case "BLOCK"
+                    (switch (upper (cmd))
+                        case "END"
+                            (array:pop (local.state))
+                            (eval (local.buffer))
+                        default
+                            (append local.buffer (line))
+                            (append local.buffer "\n")
                     )
             )
         )
