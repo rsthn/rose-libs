@@ -50,6 +50,34 @@
 )
 
 
+;; Returns the identity of the caller.
+;; @returns { arn:string, user_id:string, account:string }
+(def-fn wasabi:get-caller-identity
+    (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
+    (set contentType "text/plain")
+    (set signature (wasabi:sign `GET\n\n{contentType}\n{requestDate}\n/`))
+
+    (request:headers [
+        "Content-Type: (contentType)"
+        "Date: (requestDate)"
+        "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
+    ])
+
+    (when (process-response (request:get "https://sts.wasabisys.com/?Action=GetCallerIdentity"))
+        (throw (local.LAST_ERROR)))
+
+    (set res (xml:parse (request:data)))
+    (set res (xml:simplify (res)))
+
+    (set res (res.GetCallerIdentityResponse.GetCallerIdentityResult.0))
+    {
+        arn (res.Arn.0)
+        user_id (res.UserId.0)
+        account (res.Account.0)
+    }
+)
+
+
 ;; Verifies if the specified path exists.
 ;; @param {string} bucketName: Name of the bucket.
 ;; @param {string} filePath: Relative path to the file.
