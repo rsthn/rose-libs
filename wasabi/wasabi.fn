@@ -1,19 +1,21 @@
 ;; *********************
 ;; Wasabi S3 API
 
-(set ACCESS_KEY_ID (config.wasabi.accessKeyId))
-(set SECRET_ACCESS_KEY (config.wasabi.secretAccessKey))
+(set HOSTNAME null)
+(set ACCESS_KEY_ID null)
+(set SECRET_ACCESS_KEY null)
+(set SESSION_TOKEN null)
 (set PROGRESS_HANDLER null)
 (set LAST_ERROR "")
 
 
 ;; Sets the Wasabi credentials.
-;; @param {string} accessKeyId
-;; @param {string} secretAccessKey
-;; @returns {void}
-(def-fn wasabi:config accessKeyId secretAccessKey
-    (set local.ACCESS_KEY_ID (accessKeyId))
-    (set local.SECRET_ACCESS_KEY (secretAccessKey))
+;; @param { access_key_id:string, secret_access_key:string, session_token:string, hostname:string } data
+(def-fn wasabi:config data
+    (set local.ACCESS_KEY_ID (data.access_key_id))
+    (set local.SECRET_ACCESS_KEY (data.secret_access_key))
+    (set local.SESSION_TOKEN (data.session_token))
+    (set local.HOSTNAME (?? (data.hostname) "wasabisys.com"))
 )
 
 
@@ -38,6 +40,12 @@
         (ret true))
 
     (set data (xml:simplify (xml:parse (data))))
+
+    (when (data.ErrorResponse)
+        (set local.LAST_ERROR (concat (data.ErrorResponse.Error.'0'.Code.0) ": " (data.ErrorResponse.Error.'0'.Message.0)))
+        (ret true)
+    )
+
     (set local.LAST_ERROR (data.Error.Code.0))
     (? (local.LAST_ERROR) true false)
 )
@@ -49,21 +57,42 @@
     (local.LAST_ERROR)
 )
 
+(def-fn private wasabi:prepare-request method url content_type="text/plain"
+
+    (set request_date (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
+
+    (set signed_headers [])
+    (when (local.SESSION_TOKEN)
+        (array:push (signed_headers) "x-amz-security-token:(local.SESSION_TOKEN)")
+    )
+
+    (set string_to_sign "(method)\n")
+    (append string_to_sign "\n")
+    (append string_to_sign "(content_type)\n")
+    (append string_to_sign "(request_date)\n")
+
+    (when (signed_headers.length)
+        (append string_to_sign (concat (join "\n" (signed_headers)) "\n")))
+
+    (append string_to_sign (url))
+
+    (set signature (wasabi:sign (string_to_sign)))
+
+    (request:headers [
+        "Content-Type: (content_type)"
+        "Date: (request_date)"
+        "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
+    ])
+
+    (request:headers (signed_headers))
+)
 
 ;; Returns the identity of the caller.
 ;; @returns { arn:string, user_id:string, account:string }
 (def-fn wasabi:get-caller-identity
-    (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set contentType "text/plain")
-    (set signature (wasabi:sign `GET\n\n{contentType}\n{requestDate}\n/`))
 
-    (request:headers [
-        "Content-Type: (contentType)"
-        "Date: (requestDate)"
-        "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
-    ])
-
-    (when (process-response (request:get "https://sts.wasabisys.com/?Action=GetCallerIdentity"))
+    (wasabi:prepare-request "GET" "/")
+    (when (process-response (request:get "https://sts.(local.HOSTNAME)/?Action=GetCallerIdentity"))
         (throw (local.LAST_ERROR)))
 
     (set res (xml:parse (request:data)))
@@ -78,22 +107,50 @@
 )
 
 
+;; Returns a set of temporary security credentials that you can use to access resources.
+;; @param {string} role_arn: The Resource Name (ARN) of the role to assume.
+;; @param {int} duration_seconds: The duration, in seconds, of the role session (default is 900).
+;; @param {string} role_session_name: An identifier for the assumed role session (default is "wasabi_session").
+;; @returns { arn:string, access_key_id:string, secret_access_key:string, session_token:string, expiration:string }
+(def-fn wasabi:assume-role role_arn duration_seconds=900 role_session_name="wasabi_session"
+
+    (wasabi:prepare-request "GET" "/")
+    (when (process-response (request:get "https://sts.(local.HOSTNAME)/?Action=AssumeRole&RoleArn=(role_arn)&DurationSeconds=(duration_seconds)&RoleSessionName=(role_session_name)"))
+        (throw (local.LAST_ERROR)))
+
+    (set res (xml:parse (request:data)))
+    (set res (xml:simplify (res)))
+    (set res (res.AssumeRoleResponse.AssumeRoleResult.0))
+
+    {
+        arn (res.AssumedRoleUser.'0'.Arn.0)
+        access_key_id (res.Credentials.'0'.AccessKeyId.0)
+        secret_access_key (res.Credentials.'0'.SecretAccessKey.0)
+        session_token (res.Credentials.'0'.SessionToken.0)
+        expiration (res.Credentials.'0'.Expiration.0)
+    }
+)
+
+
 ;; Verifies if the specified path exists.
 ;; @param {string} bucketName: Name of the bucket.
 ;; @param {string} filePath: Relative path to the file.
 ;; @returns {bool}
 (def-fn wasabi:exists bucketName filePath=""
-    (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set contentType "text/plain")
-    (set signature (wasabi:sign `HEAD\n\n{contentType}\n{requestDate}\n/{bucketName}/{filePath}`))
 
-    (request:headers [
-        "Content-Type: (contentType)"
-        "Date: (requestDate)"
-        "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
-    ])
+    (when (ends-with? "/" (filePath))
 
-    (request:head "https://s3.wasabisys.com/(bucketName)/(filePath)")
+        (wasabi:prepare-request "GET" "/(bucketName)/")
+        (when (process-response (request:get "https://s3.(local.HOSTNAME)/(bucketName)/?prefix=(substr 0 -1 (filePath))&max-keys=1"))
+            (throw (local.LAST_ERROR)))
+
+        (set res (xml:parse (request:data)))
+        (set res (xml:simplify (res)))
+        (ret (not-null? (res.ListBucketResult.Contents)))
+    )
+
+    (wasabi:prepare-request "HEAD" "/(bucketName)/(filePath)")
+    (request:head "https://s3.(local.HOSTNAME)/(bucketName)/(filePath)")
     (eq? 200 (request:status))
 )
 
@@ -102,17 +159,9 @@
 ;; @param {string} bucketName: Name of the bucket to create.
 ;; @returns {void}
 (def-fn wasabi:create-bucket bucketName
-    (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set contentType "text/plain")
-    (set signature (wasabi:sign `PUT\n\n{contentType}\n{requestDate}\n/{bucketName}/`))
 
-    (request:headers [
-        "Content-Type: (contentType)"
-        "Date: (requestDate)"
-        "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
-    ])
-
-    (when (process-response (request:put "https://s3.wasabisys.com/(bucketName)/"))
+    (wasabi:prepare-request "PUT" "/(bucketName)/")
+    (when (process-response (request:put "https://s3.(local.HOSTNAME)/(bucketName)/"))
         (throw (local.LAST_ERROR)))
 )
 
@@ -121,17 +170,9 @@
 ;; @param {string} bucketName: Name of the bucket to delete.
 ;; @returns {void}
 (def-fn wasabi:delete-bucket bucketName
-    (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set contentType "text/plain")
-    (set signature (wasabi:sign `DELETE\n\n{contentType}\n{requestDate}\n/{bucketName}/`))
 
-    (request:headers [
-        "Content-Type: (contentType)"
-        "Date: (requestDate)"
-        "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
-    ])
-
-    (when (process-response (request:delete "https://s3.wasabisys.com/(bucketName)/"))
+    (wasabi:prepare-request "DELETE" "/(bucketName)/")
+    (when (process-response (request:delete "https://s3.(local.HOSTNAME)/(bucketName)/"))
         (throw (local.LAST_ERROR)))
 )
 
@@ -139,17 +180,9 @@
 ;; Lists all buckets.
 ;; @returns { [{created:datetime, name:string}] } List of buckets.
 (def-fn wasabi:list-buckets
-    (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set contentType "text/plain")
-    (set signature (wasabi:sign `GET\n\n{contentType}\n{requestDate}\n/`))
 
-    (request:headers [
-        "Content-Type: (contentType)"
-        "Date: (requestDate)"
-        "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
-    ])
-
-    (when (process-response (request:get "https://s3.wasabisys.com/"))
+    (wasabi:prepare-request "GET" "/")
+    (when (process-response (request:get "https://s3.(local.HOSTNAME)/"))
         (throw (local.LAST_ERROR)))
 
     (set res (xml:parse (request:data)))
@@ -167,17 +200,9 @@
 ;; @param {string} folderPath: Relative path of the folder to create. Do not end with a slash.
 ;; @returns {void}
 (def-fn wasabi:create-folder bucketName folderPath
-    (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set contentType "text/plain")
-    (set signature (wasabi:sign `PUT\n\n{contentType}\n{requestDate}\n/{bucketName}/{folderPath}/`))
 
-    (request:headers [
-        "Content-Type: (contentType)"
-        "Date: (requestDate)"
-        "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
-    ])
-
-    (when (process-response (request:put "https://s3.wasabisys.com/(bucketName)/(folderPath)/"))
+    (wasabi:prepare-request "PUT" "/(bucketName)/(folderPath)/")
+    (when (process-response (request:put "https://s3.(local.HOSTNAME)/(bucketName)/(folderPath)/"))
         (throw (local.LAST_ERROR)))
 )
 
@@ -189,16 +214,9 @@
 ;; @param {string} contentType: Content type of the data.
 ;; @returns {void}
 (def-fn wasabi:upload-data bucketName filePath fileData contentType="application/octet-stream"
-    (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set signature (wasabi:sign `PUT\n\n{contentType}\n{requestDate}\n/{bucketName}/{filePath}`))
 
-    (request:headers [
-        "Content-Type: (contentType)"
-        "Date: (requestDate)"
-        "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
-    ])
-
-    (when (process-response (request:put "https://s3.wasabisys.com/(bucketName)/(filePath)" (fileData)))
+    (wasabi:prepare-request "PUT" "/(bucketName)/(filePath)" (contentType))
+    (when (process-response (request:put "https://s3.(local.HOSTNAME)/(bucketName)/(filePath)" (fileData)))
         (throw (local.LAST_ERROR)))
 )
 
@@ -259,17 +277,10 @@
 ;; @param {string} filePath: Relative path of the file to download.
 ;; @returns {string}
 (def-fn wasabi:download-data bucketName filePath
-    (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set contentType "text/plain")
-    (set signature (wasabi:sign `GET\n\n{contentType}\n{requestDate}\n/{bucketName}/{filePath}`))
 
-    (request:headers [
-        "Content-Type: (contentType)"
-        "Date: (requestDate)"
-        "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
-    ])
+    (wasabi:prepare-request "GET" "/(bucketName)/(filePath)")
+    (request:get "https://s3.(local.HOSTNAME)/(bucketName)/(filePath)")
 
-    (request:get "https://s3.wasabisys.com/(bucketName)/(filePath)")
     (when (ne? 200 (request:status))
         (throw (request:status)))
 
@@ -282,18 +293,10 @@
 ;; @param {string} targetFilePath: The target path to save the file.
 ;; @returns {bool}
 (def-fn wasabi:download-file bucketName filePath targetFilePath
-    (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set contentType "text/plain")
-    (set signature (wasabi:sign `GET\n\n{contentType}\n{requestDate}\n/{bucketName}/{filePath}`))
 
-    (request:headers [
-        "Content-Type: (contentType)"
-        "Date: (requestDate)"
-        "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
-    ])
-
+    (wasabi:prepare-request "GET" "/(bucketName)/(filePath)")
     (request:output-file (targetFilePath))
-    (request:get "https://s3.wasabisys.com/(bucketName)/(filePath)")
+    (request:get "https://s3.(local.HOSTNAME)/(bucketName)/(filePath)")
 )
 
 
@@ -302,17 +305,9 @@
 ;; @param {string} folderPath: Relative path of the folder.
 ;; @returns { [{lastModified:datetime, path:string, size:int}] } List of files.
 (def-fn wasabi:list bucketName folderPath="" lastKey="" pageNumber=0
-    (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set contentType "text/plain")
-    (set signature (wasabi:sign `GET\n\n{contentType}\n{requestDate}\n/{bucketName}/`))
 
-    (request:headers [
-        "Content-Type: (contentType)"
-        "Date: (requestDate)"
-        "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
-    ])
-
-    (when (process-response (request:get "https://s3.wasabisys.com/(bucketName)/?prefix=(folderPath)&max-keys=1000&marker=(lastKey)"))
+    (wasabi:prepare-request "GET" "/(bucketName)/")
+    (when (process-response (request:get "https://s3.(local.HOSTNAME)/(bucketName)/?prefix=(folderPath)&max-keys=1000&marker=(lastKey)"))
         (throw (local.LAST_ERROR)))
 
     (set res (xml:parse (request:data)))
@@ -340,17 +335,9 @@
 ;; @param {string} folderPath: Relative path of the folder.
 ;; @returns { [{lastModified:datetime, path:string}] } List of folders.
 (def-fn wasabi:list-folders bucketName folderPath="" lastKey="" pageNumber=0
-    (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set contentType "text/plain")
-    (set signature (wasabi:sign `GET\n\n{contentType}\n{requestDate}\n/{bucketName}/`))
 
-    (request:headers [
-        "Content-Type: (contentType)"
-        "Date: (requestDate)"
-        "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
-    ])
-
-    (when (process-response (request:get "https://s3.wasabisys.com/(bucketName)/?prefix=(folderPath)&max-keys=1000&marker=(lastKey)"))
+    (wasabi:prepare-request "GET" "/(bucketName)/")
+    (when (process-response (request:get "https://s3.(local.HOSTNAME)/(bucketName)/?prefix=(folderPath)&max-keys=1000&marker=(lastKey)"))
         (throw (local.LAST_ERROR)))
 
     (set res (xml:parse (request:data)))
@@ -386,17 +373,9 @@
 ;; @param {string} filePath: Relative path of the file to delete.
 ;; @returns {void}
 (def-fn wasabi:delete bucketName filePath
-    (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set contentType "text/plain")
-    (set signature (wasabi:sign `DELETE\n\n{contentType}\n{requestDate}\n/{bucketName}/{filePath}`))
 
-    (request:headers [
-        "Content-Type: (contentType)"
-        "Date: (requestDate)"
-        "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
-    ])
-
-    (when (process-response (request:delete "https://s3.wasabisys.com/(bucketName)/(filePath)"))
+    (wasabi:prepare-request "DELETE" "/(bucketName)/(filePath)")
+    (when (process-response (request:delete "https://s3.(local.HOSTNAME)/(bucketName)/(filePath)"))
         (throw (local.LAST_ERROR)))
 )
 
@@ -405,17 +384,9 @@
 ;; @param {string} filePath: Relative path to the file.
 ;; @returns {int|null}
 (def-fn wasabi:filesize bucketName filePath
-    (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set contentType "text/plain")
-    (set signature (wasabi:sign `HEAD\n\n{contentType}\n{requestDate}\n/{bucketName}/{filePath}`))
 
-    (request:headers [
-        "Content-Type: (contentType)"
-        "Date: (requestDate)"
-        "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
-    ])
-
-    (request:head "https://s3.wasabisys.com/(bucketName)/(filePath)")
+    (wasabi:prepare-request "HEAD" "/(bucketName)/(filePath)")
+    (request:head "https://s3.(local.HOSTNAME)/(bucketName)/(filePath)")
     (when (ne? 200 (request:status))
         (ret null))
 
@@ -428,17 +399,9 @@
 ;; @param {string} filePath: Relative path of the file to create.
 ;; @returns {string} The upload ID.
 (def-fn wasabi:multipart-initiate bucketName filePath
-    (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set contentType "text/plain")
-    (set signature (wasabi:sign `POST\n\n{contentType}\n{requestDate}\n/{bucketName}/{filePath}?uploads`))
 
-    (request:headers [
-        "Content-Type: (contentType)"
-        "Date: (requestDate)"
-        "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
-    ])
-
-    (when (process-response (request:post "https://s3.wasabisys.com/(bucketName)/(filePath)?uploads" "{}"))
+    (wasabi:prepare-request "POST" "/(bucketName)/(filePath)?uploads")
+    (when (process-response (request:post "https://s3.(local.HOSTNAME)/(bucketName)/(filePath)?uploads" "{}"))
         (throw (local.LAST_ERROR)))
 
     (set res (xml:parse (request:data)))
@@ -456,17 +419,9 @@
 ;; @param {string} data: Data to upload.
 ;; @returns {void}
 (def-fn wasabi:multipart-upload bucketName filePath uploadId partsList data
-    (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set contentType "application/octet-stream")
-    (set signature (wasabi:sign `PUT\n\n{contentType}\n{requestDate}\n/{bucketName}/{filePath}?partNumber={+ 1 {partsList.length}}&uploadId={uploadId}`))
 
-    (request:headers [
-        "Content-Type: (contentType)"
-        "Date: (requestDate)"
-        "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
-    ])
-
-    (when (process-response (request:put "https://s3.wasabisys.com/(bucketName)/(filePath)?partNumber=(+ 1 (partsList.length))&uploadId=(uploadId)" (data)))
+    (wasabi:prepare-request "PUT" "/(bucketName)/(filePath)?partNumber=(+ 1 (partsList.length))&uploadId=(uploadId)" "application/octet-stream")
+    (when (process-response (request:put "https://s3.(local.HOSTNAME)/(bucketName)/(filePath)?partNumber=(+ 1 (partsList.length))&uploadId=(uploadId)" (data)))
         (throw (local.LAST_ERROR)))
 
     (array:push (partsList) (&
@@ -483,15 +438,6 @@
 ;; @param { [{partNumber:int, etag:string}] } partsList: The list of parts.
 ;; @returns {void}
 (def-fn wasabi:multipart-complete bucketName filePath uploadId partsList
-    (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set contentType "application/xml")
-    (set signature (wasabi:sign `POST\n\n{contentType}\n{requestDate}\n/{bucketName}/{filePath}?uploadId={uploadId}`))
-
-    (request:headers [
-        "Content-Type: (contentType)"
-        "Date: (requestDate)"
-        "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
-    ])
 
     (set xmlData (concat
         "<CompleteMultipartUpload>"
@@ -501,7 +447,8 @@
         "</CompleteMultipartUpload>"
     ))
 
-    (when (process-response (request:post "https://s3.wasabisys.com/(bucketName)/(filePath)?uploadId=(uploadId)" (xmlData)))
+    (wasabi:prepare-request "POST" "/(bucketName)/(filePath)?uploadId=(uploadId)" "application/xml")
+    (when (process-response (request:post "https://s3.(local.HOSTNAME)/(bucketName)/(filePath)?uploadId=(uploadId)" (xmlData)))
         (throw (local.LAST_ERROR)))
 )
 
@@ -512,16 +459,8 @@
 ;; @param {string} uploadId: The upload ID.
 ;; @returns {void}
 (def-fn wasabi:multipart-cancel bucketName filePath uploadId
-    (set requestDate (datetime:format (datetime:now) "%a, %d %b %Y %H:%M:%S GMT"))
-    (set contentType "text/plain")
-    (set signature (wasabi:sign `DELETE\n\n{contentType}\n{requestDate}\n/{bucketName}/{filePath}?uploadId={uploadId}`))
 
-    (request:headers [
-        "Content-Type: (contentType)"
-        "Date: (requestDate)"
-        "Authorization: AWS (local.ACCESS_KEY_ID):(signature)"
-    ])
-
-    (when (process-response (request:delete "https://s3.wasabisys.com/(bucketName)/(filePath)?uploadId=(uploadId)"))
+    (wasabi:prepare-request "DELETE" "/(bucketName)/(filePath)?uploadId=(uploadId)")
+    (when (process-response (request:delete "https://s3.(local.HOSTNAME)/(bucketName)/(filePath)?uploadId=(uploadId)"))
         (throw (local.LAST_ERROR)))
 )
