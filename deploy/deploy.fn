@@ -5,6 +5,7 @@
 ;; Local variables.
 (set vars {
     storage {}
+    args []
     cwd []
 })
 
@@ -142,7 +143,10 @@
 )
 
 ;; Executes a deployment file.
-(def-fn execute srcFile
+(def-fn execute srcFile args=null
+
+    (when (args)
+        (set local.vars.args (args)))
 
     (set src (path:resolve (srcFile)))
     (when-not (path:exists (src))
