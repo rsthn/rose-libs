@@ -21,15 +21,15 @@
     (when (local.orgid)
         (request:header "OpenAI-Organization: (local.orgid)"))
 
-    (set result (request:fetch "POST" "https://api.openai.com/v1/audio/transcriptions" (&
+    (set result (request:fetch "POST" "https://api.openai.com/v1/audio/transcriptions" {
         file (audio)
         model (model)
-        temperature (float (temperature))
-    )))
+        temperature (number (temperature))
+    }))
 
-    (when (ne 200 (request:code))
-        (trace "[ERROR] (datetime:now): openai:transcript (request:code): (result)")
-        (throw "Unable to get transcript: (request:code) (result.error.message)")
+    (when (ne? 200 (request:status))
+        (trace "[ERROR] (datetime:now): openai:transcript (request:status): (result)")
+        (throw "Unable to get transcript: (request:status) (result.error.message)")
     )
 
     (result.text)
@@ -46,15 +46,15 @@
     (when (local.orgid)
         (request:header "OpenAI-Organization: (local.orgid)"))
 
-    (set result (request:fetch "POST" "https://api.openai.com/v1/audio/translations" (&
+    (set result (request:fetch "POST" "https://api.openai.com/v1/audio/translations" {
         file (audio)
         model (model)
-        temperature (float (temperature))
-    )))
+        temperature (number (temperature))
+    }))
 
-    (when (ne 200 (request:code))
-        (trace "[ERROR] (datetime:now): openai:translation (request:code): (result)")
-        (throw "Unable to get translation: (request:code) (result.error.message)")
+    (when (ne? 200 (request:status))
+        (trace "[ERROR] (datetime:now): openai:translation (request:status): (result)")
+        (throw "Unable to get translation: (request:status) (result.error.message)")
     )
 
     (result.text)
@@ -72,37 +72,37 @@
     (when (local.orgid)
         (request:header "OpenAI-Organization: (local.orgid)"))
 
-    (set result (request:post "https://api.openai.com/v1/audio/speech" (json:stringify (&
+    (set result (request:post "https://api.openai.com/v1/audio/speech" (json:str {
         model (model)
         input (input)
         voice (voice)
         response_format (response_format)
         speed 1.0
-    ))))
+    })))
 
-    (when (ne 200 (request:code))
+    (when (ne? 200 (request:status))
         (set result (json:parse (result)))
-        (trace "[ERROR] (datetime:now): openai:speech (request:code): (result)")
-        (throw "Unable to get speech: (request:code) (result.error.message)")
+        (trace "[ERROR] (datetime:now): openai:speech (request:status): (result)")
+        (throw "Unable to get speech: (request:status) (result.error.message)")
     )
 
     (result)
 )
 
 ;; Creates a new chat request object.
-;; @param {string} [model="gpt-3.5-turbo"] Models: `gpt-4`, `gpt-4-turbo-preview`, and `gpt-3.5-turbo`.
+;; @param {string} [model="gpt-4o"] Models: `gpt-4`, `gpt-4-turbo-preview`, and `gpt-4o`.
 ;; @param {string} [response_type=null] Response types: `null`, `json_object`.
 ;; @param {object} [functions=null] A list of functions to call.
 ;; @param {number} [temperature=0.25] The randomness of the response.
 ;; @returns {object}
-(def-fn openai:chat model="gpt-3.5-turbo" response_type=null functions=null temperature="0.25"
+(def-fn openai:chat model="gpt-4o" response_type=null functions=null temperature="0.25"
 
-    (set chat (&
+    (set chat {
         model (model)
-        temperature (float (temperature))
+        temperature (number (temperature))
         top_p 0.5
-        messages (#)
-    ))
+        messages []
+    })
 
     (when (response_type)
         (set chat.response_format (& type (response_type))))
@@ -119,7 +119,7 @@
 ;; @param {object} chat - The chat request object.
 ;; @param {string|array[string]} text - The message to add.
 (def-fn openai:message chat text
-    (if (eq "array" (typeof (text)))
+    (if (eq? "array" (typeof (text)))
         (for content (text)
             (array:push (chat.messages) (& role "user" content (content))))
     else
@@ -131,7 +131,7 @@
 ;; @param {object} chat - The chat request object.
 ;; @param {string|array[string]} text - The message to add.
 (def-fn openai:rule chat text
-    (if (eq "array" (typeof (text)))
+    (if (eq? "array" (typeof (text)))
         (for content (text)
             (array:push (chat.messages) (& role "system" content (content))))
     else
@@ -156,20 +156,20 @@
     (when (local.orgid)
         (request:header "OpenAI-Organization: (local.orgid)"))
 
-    (set result (request:fetch "POST" "https://api.openai.com/v1/chat/completions" (json:stringify (chat))))
-    (when (ne 200 (request:code))
-        (trace "[ERROR] (datetime:now): openai:complete (request:code): (result)")
-        (throw "Unable to complete chat: (request:code) (result.error.message)")
+    (set result (request:fetch "POST" "https://api.openai.com/v1/chat/completions" (json:str (chat))))
+    (when (ne? 200 (request:status))
+        (trace "[ERROR] (datetime:now): openai:complete (request:status): (result)")
+        (throw "Unable to complete chat: (request:status) (result.error.message)")
     )
 
     (for choice (result.choices)
 
         ;; Skip messages from the assistant.
-        (when (ne "assistant" (choice.message.role))
+        (when (ne? "assistant" (choice.message.role))
             (continue))
 
         ;; Process function calls.
-        (when (eq "function_call" (choice.finish_reason))
+        (when (eq? "function_call" (choice.finish_reason))
 
             ;; Remove function call from functions list for next completion.
             (array:remove (chat.functions) (findIndex i (chat.functions) (eq (choice.message.function_call.name) (i.name))))
@@ -186,13 +186,13 @@
 
             ;; Add the current message along with the function response to the chat.
             (array:push (chat.messages) (choice.message))
-            (openai:functionResponse (chat) (i.message.function_call.name) (json:stringify (functionResponse)))
+            (openai:functionResponse (chat) (i.message.function_call.name) (json:str (functionResponse)))
 
             (ret (openai:complete (chat)))
         )
 
         ;; Check if finish reason was not natural stop.
-        (when (ne "stop" (choice.finish_reason))
+        (when (ne? "stop" (choice.finish_reason))
             (trace "[ERROR] (datetime:now): openai:complete: finish_reason=(choice.finish_reason), usage: (result.usage)")
             (throw "Finish reason: (choice.finish_reason)")
         )
@@ -283,4 +283,10 @@
 
     (set local.fnDescriptors.(name) (fdef))
     (fdef)
+)
+
+(def-fn openai:ask question json_object=false model="gpt-4o" temperature=0.25
+    (set chat (openai:chat (model) (? (json_object) "json_object" null) null (temperature)))
+    (openai:message (chat) (question))
+    (openai:complete (chat))
 )
