@@ -12,10 +12,11 @@
 
 ;; Returns the transcript of an audio file. Uses the `whisper-1` model by default.
 ;; @param { string | {path:str} | {name:str, data:str} } audio
+;; @param {string} [lang=""]
 ;; @param {string} [model="whisper-1"]
 ;; @param {number} [temperature=0.0]
 ;; @returns {string}
-(def-fn openai:transcript audio model="whisper-1" temperature=0.0
+(def-fn openai:transcript audio lang="" model="whisper-1" temperature=0.0
 
     (request:auth "bearer" (local.key))
     (when (local.orgid)
@@ -25,6 +26,7 @@
         file (audio)
         model (model)
         temperature (number (temperature))
+        language (lang)
     }))
 
     (when (ne? 200 (request:status))

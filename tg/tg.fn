@@ -54,7 +54,10 @@
 )
 
 
-;; Sets the webhook of the bot. Returns the `secret_token` on success or `null` on failure.
+;; Sets the webhook of the bot. Returns the `secret_token` on success or `null` on failure. When a request from Telegram is generated
+;; to the URL, the header HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN will contain the secret token. Use tg:onMessage to setup a message processing
+;; function and call tg:processUpdates (passing the parsed POST body) to process messages.
+;;
 ;; @param {string} url
 ;; @param {object} [webhookConfig]
 ;; @returns {string|null}
@@ -133,7 +136,7 @@
 ;; @param {int|array[int]} messageId
 ;; @returns {boolean}
 (def-fn tg:deleteMessage chatId messageId
-    (if (eq "array" (typeof (messageId)))
+    (if (eq? "array" (typeof (messageId)))
         (tg:call "deleteMessages" (& chat_id (chatId) message_ids (messageId) ))
     else
         (tg:call "deleteMessage" (& chat_id (chatId) message_id (messageId) ))
@@ -221,7 +224,7 @@
     (for update (updateList)
         (set last_update_id (update.update_id))
 
-        (when (has "message" (update))
+        (when (in? (update) "message")
             (when (local.tgHandlers.message)
                 ((local.tgHandlers.message)
                     (update.message.from)
@@ -310,7 +313,7 @@
 ;; @param { string | {file_id: number} } file
 ;; @returns {File}
 (def-fn tg:getFile file
-    (when (eq "string" (typeof (file)))
+    (when (eq? "string" (typeof (file)))
         (ret (tg:call "getFile" (& file_id (file))))
     )
     (tg:getFile (file.file_id))
@@ -322,7 +325,7 @@
 ;; @param {string|File} file
 ;; @returns {string}
 (def-fn tg:fileUrl file
-    (when (eq "string" (typeof (file)))
+    (when (eq? "string" (typeof (file)))
         (ret "https://api.telegram.org/file/bot(local.tgToken)/(file)")
     )
     (tg:fileUrl (file.file_path))
@@ -333,7 +336,7 @@
 ;; @param {string|File} file
 ;; @returns {string}
 (def-fn tg:downloadFile file
-    (when (eq "string" (typeof (file)))
+    (when (eq? "string" (typeof (file)))
         (ret (request:get "https://api.telegram.org/file/bot(local.tgToken)/(file)"))
     )
     (tg:downloadFile (file.file_path))
