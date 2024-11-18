@@ -141,7 +141,7 @@
     (when (ends-with? "/" (filePath))
 
         (wasabi:prepare-request "GET" "/(bucketName)/")
-        (when (process-response (request:get "https://s3.(local.HOSTNAME)/(bucketName)/?prefix=(substr 0 -1 (filePath))&max-keys=1"))
+        (when (process-response (request:get "https://s3.(local.HOSTNAME)/(bucketName)/?prefix=(str:sub 0 -1 (filePath))&max-keys=1"))
             (throw (local.LAST_ERROR)))
 
         (set res (xml:parse (request:data)))

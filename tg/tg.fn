@@ -64,7 +64,7 @@
 (def-fn tg:setWebhook url webhookConfig=(&)
     (set secret_token (or
         (webhookConfig.secret_token) 
-        (substr 0 128 (base64u:encode (openssl:random-bytes 128)))
+        (str:sub 0 128 (base64u:encode (openssl:random-bytes 128)))
     ))
 
     (set webhookConfig (&
