@@ -137,6 +137,10 @@
         case END
             (throw "Unexpected END, current state: (array:last (local.state))")
 
+        case FAIL
+            (echo (clr 91) "Error: " (clr 0) (val_ ""))
+            (throw "@STOP")
+
         default
             (set local.vars.(cmd) (val_ ""))
     )
