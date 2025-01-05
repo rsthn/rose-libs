@@ -201,7 +201,7 @@
 
         ;; Add message to the chat and return content.
         (array:push (chat.messages) (choice.message))
-        (ret (choice.message.content))
+        (ret (trim (choice.message.content)))
     )
 
     (trace "[ERROR] (datetime:now): openai:complete: unable to complete chat, result: (result)")
