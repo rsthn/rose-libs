@@ -1,0 +1,127 @@
+
+(set base_url "http://localhost:11434/api")
+(set model "deepseek-r1:7b")
+
+;;
+;; Sets or returns the current ollama API base URL address.
+;; @returns str
+;;
+(def-fn ollama:base-url base_url=null
+    (when-not (base_url)
+        (ret (local.base_url)))
+    (set local.base_url (base_url))
+    (base_url)
+)
+
+;;
+;; Sets or returns the current ollama model.
+;; @returns str
+;;
+(def-fn ollama:model model=null
+    (when-not (model)
+        (ret (local.model)))
+    (set local.model (model))
+    (model)
+)
+
+;;
+;; Get the version of Ollama you are running locally.
+;; @returns str
+;;
+(def-fn ollama:get-version base_url=null
+    (set base_url (coalesce (base_url) (local.base_url)))
+
+    (set res (request:fetch "GET" "(base_url)/version"))
+    (assert-eq 200 (request:status) "ollama:get-version")
+    (res.version)
+)
+
+;;
+;; List all models you've downloaded locally.
+;;
+;; @returns list[obj[
+;;   name: str
+;;   model: str
+;;   size: int
+;;   ...
+;; ]]
+;;
+(def-fn ollama:tags base_url=null
+    (set base_url (coalesce (base_url) (local.base_url)))
+
+    (set res (request:fetch "GET" "(base_url)/tags"))
+    (assert-eq 200 (request:status) "ollama:tags")
+    (res.models)
+)
+
+;;
+;; Generates embeddings for the specified input text. In LLMs, embeddings are numerical representations of words,
+;; phrases, or sentences that capture their meaning and context.
+;;
+;; @returns obj[
+;;   model: str
+;;   embeddings: list[list[float]]
+;;   total_duration: float
+;;   load_duration: float
+;;   prompt_eval_count: int
+;; ]
+;;
+(def-fn ollama:embed input model=null base_url=null
+    (set base_url (coalesce (base_url) (local.base_url)))
+    (set model (coalesce (model) (local.model)))
+
+    (set res (request:fetch "POST" "(base_url)/embed"
+        (json:str {
+            "model" (model)
+            "input" (input)
+        })
+    ))
+
+    (assert-eq 200 (request:status) "ollama:embed")
+    (res)
+)
+
+;;
+;; Generate a chat interaction without streaming output.
+;; @returns obj[
+;;   model: str
+;;   created_at: str
+;;   response: str
+;;   done: bool
+;;   done_reason: str
+;;   context: array[int]
+;;   total_duration: int
+;;   prompt_eval_count: int
+;;   prompt_eval_duration: int
+;;   eval_count: int
+;;   eval_duration: int
+;; ]
+;;
+(def-fn ollama:generate prompt images=null format=null stream=false model=null base_url=null
+    (set base_url (coalesce (base_url) (local.base_url)))
+    (set model (coalesce (model) (local.model)))
+
+    (set res (request:fetch "POST" "(base_url)/generate"
+        (json:str {
+            "model" (model)
+            "prompt" (prompt)
+            "stream" (stream)
+            "format" (format)
+            "images" (images)
+            "options" {
+                "temperature" 0.37
+            }
+        })
+    ))
+
+    (assert-eq 200 (request:status) "ollama:generate")
+    (res)
+)
+
+; (request:output-handler (fn data
+;     (with data (json:parse (data))
+;         (print (data.response))
+;     )
+; ))
+
+; (ollama:generate "Why is the sky blue?" null null true)

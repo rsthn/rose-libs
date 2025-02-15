@@ -141,6 +141,9 @@
             (echo (clr 91) "Error: " (clr 0) (val_ ""))
             (throw "@STOP")
 
+        case EVAL
+            (val_ "")
+
         default
             (set local.vars.(cmd) (val_ ""))
     )
