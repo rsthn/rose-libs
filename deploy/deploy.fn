@@ -96,6 +96,9 @@
         case COPY
             (file:copy (local.vars.r0) (val_ null))
 
+        case RENAME
+            (path:rename (local.vars.r0) (val_ null))
+
         case REPLACE
             (set value (val_ null))
             (file:write (value) (str:replace (local.vars.r0) (local.vars.r1) (file:read (value))))
@@ -231,7 +234,7 @@
     catch
         (switch (err)
             case "@STOP"
-            default (throw "line (local.lineno): (err)")
+            default (throw (err))
         )
     )
 )
