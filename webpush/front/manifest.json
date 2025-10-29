@@ -1,0 +1,16 @@
+{
+    "short_name": "Informer",
+    "name": "Informer",
+    "display": "fullscreen",
+    "orientation": "portrait-primary",
+    "start_url": "/informer/index.html",
+    "background_color": "#000",
+    "icons":
+    [
+        {
+          "src": "https://crisol.app/ssylka/icon-256.png",
+          "type": "image/png",
+          "sizes": "256x256"
+        }
+    ]
+}

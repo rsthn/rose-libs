@@ -1,0 +1,76 @@
+(include "./startup")
+
+(shield:method-required "POST")
+(shield:body-required "application/json")
+
+(shield:validate-data input (gateway.body)
+    (object
+        username (rules
+            required true
+            pattern username
+            min-length 6
+            max-length 256
+        )
+
+        title (rules
+            required true
+            max-length 128
+        )
+        body (rules
+            required true
+            max-length 256
+        )
+        icon (rules
+            required false
+            max-length 256
+        )
+        image (rules
+            required false
+            max-length 256
+        )
+    )
+)
+
+;; get user_id from username
+(set user_id (db:scalar 
+    `select user_id from users where deleted_at is null and username=?`
+    (input.username)
+))
+(assert (user_id) "Invalid username")
+
+;; load libraries, vapid and subscriptions
+(import "lib/webpush")
+
+(webpush:set-vapid (json:parse (file:read "conf/vapid.json")))
+
+(set subscription (db:scalar `select webpush_subscription from devices where user_id=? limit 1` (user_id)))
+(set subscription (json:parse (subscription)))
+(set client (webpush:load-subscription (subscription)))
+
+(webpush:send (client)
+    {
+        "title" (input.title)
+        "body" (input.body)
+        "icon" (input.icon)
+        "image" (input.image)
+        "data" {
+            "fetch" {
+                "method" "POST"
+                "url" "https://lambda.crisol.app/v5/jessica-xi/notify"
+                "headers" {
+                    "Authorization" "TOKEN LhVfbXHZM4a5A-3WzB0C2fNts_t-wAqCfKbuBFtoLBAcTEzSTU11ySvG_fiT4Z1E"
+                }
+            }
+            "data" {
+                "username" (user_id)
+            }
+            "target_url" "https://imagex1.sx.cdn.live/images/pinporn/2020/10/30/23872514.gif"
+        }
+        "actions" [
+            {
+                "action" "ok"
+                "title" "Ok"
+            }
+        ]
+    }
+)

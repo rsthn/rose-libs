@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta http-equiv="content-type" content="text/html; charset=utf-8" />
+	<meta name="viewport" content="minimal-ui, width=device-width, height=device-height, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no" />
+	<meta name="mobile-web-app-capable" content="yes" />
+    <link rel="icon" href="data:;base64,iVBORw0KGgo=" />
+    <link rel="manifest" href="manifest.json?r=6" />
+
+    <title>Informer</title>
+    <script src="webpush.js?r=6"></script>
+</head>
+<body>
+
+    <label>Username:</label>
+    <input type="text" id="username" name="username"/>
+    <button onclick="start()">Register</button>
+
+    <script>
+        async function start() {
+
+            try {
+                let info = await fetch('https://lambda.crisol.app/v5/informer/info');
+                info = await info.json();
+                if (!info.applicationServerKey)
+                    throw new Error('Unable to fetch application server key.');
+
+                let username = document.getElementById('username').value.trim();
+                if (!username)
+                    throw new Error('Username is required.');
+
+                let subscription = await WebPush.requestPermission({
+                    applicationServerKey: info.applicationServerKey,
+                    serviceWorkerUrl: 'webpush.service-worker.js?r=' + Date.now()
+                });
+
+                let response = await fetch(info.registrationUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username,
+                        subscription
+                    })
+                });
+                response = await response.json();
+
+                if (response.success)
+                    alert('Successfully registered.');
+                else
+                    alert('Error: ' + response.error);
+            }
+            catch (err) {
+                alert('Error: ' + err);
+            }
+        }
+    </script>
+</body>
+</html>

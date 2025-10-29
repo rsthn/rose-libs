@@ -1,0 +1,39 @@
+
+;; Converts the given URL to an audience claim for a JWT token.
+;; @code (`jwt:get-aud` <url>)
+;; @example
+;; (jwt:get-aud "https://example.com/foo/bar")
+;; ; "https://example.com"
+(def-fn jwt:get-aud url
+    (join "/" (array:slice 0 3 (split "/" (url))))
+)
+
+;; Encodes the given payload into a JWT token (ES256) using the given private key.
+;; @code (`jwt:encode` <private_key> <jwt_payload>)
+;; @example
+;; (jwt:encode (private_key) { aud "https://example.com" sub "mailto:example@example.com" })
+;; ; (base64-url encoded JWT token)
+(def-fn jwt:sign private_key jwt_payload
+
+    (set jwt_header {
+        "typ" "JWT"
+        "alg" "ES256"
+    })
+
+    (when-not (in? (jwt_payload) "aud")
+        (throw "field `aud` missing"))
+
+    (when-not (in? (jwt_payload) "sub")
+        (throw "field `sub` missing"))
+
+    (when-not (in? (jwt_payload) "exp")
+        (set jwt_payload.exp (+ (datetime:int) 43200)))
+
+    (set encoded_header (base64u:encode (json:str (jwt_header))))
+    (set encoded_payload (base64u:encode (json:str (jwt_payload))))
+
+    (set signature (der:extract "int" (openssl:sign (private_key) "sha256" "(encoded_header).(encoded_payload)") 32))
+    (set encoded_signature (base64u:encode (signature)))
+
+    "(encoded_header).(encoded_payload).(encoded_signature)"
+)

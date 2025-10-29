@@ -1,0 +1,390 @@
+(import "lib/hkdf")
+(import "lib/jwt")
+
+(def TAG_LENGTH 16)
+(def KEY_LENGTH 16)
+(def NONCE_LENGTH 12)
+(def SHA_256_LENGTH 32)
+
+(set vapid {})
+(set client {})
+
+(def-fn parse_params params
+    (set header {})
+
+    (set header.version (or (params.version) "aes128gcm"))
+    (when-not (in? ["aes128gcm" "aesgcm"] (header.version))
+        (throw "[parse_params] invalid version parameter: (header.version)"))
+    (set header.rs (or (int (params.rs)) 4096))
+
+    (set overhead (map:get { "aes128gcm" 1 "aesgcm" 2 } (header.version)))
+    (when (== "aes128gcm" (header.version))
+        (inc overhead (TAG_LENGTH)))
+
+    (when (<= (header.rs) (overhead))
+        (throw "[parse_params] the rs parameter \((header.rs)\) has to be greater than (overhead)"))
+
+    (when (params.salt)
+        (set header.salt (params.salt))
+        (when (ne? (buf:len (header.salt)) (KEY_LENGTH))
+            (throw "[parse_params] the salt parameter must be (KEY_LENGTH) bytes"))
+    )
+
+    (set header.keyid (params.keyid))
+
+    (if (params.key)
+        (set header.key (params.key))
+    else
+        (set header.private_key (params.private_key))
+        (set header.private_key_ (params.private_key_))
+        (set header.public_key (params.public_key))
+        (set header.public_key_ (params.public_key_))
+
+        (when (ne? (header.version) "aes128gcm")
+            (set header.keylabel (or (params.keylabel) "P-256")))
+
+        (when (params.dh)
+            (set header.dh (params.dh))
+            (set header.dh_ (params.dh_))
+        )
+    )
+
+    (when (params.auth_secret)
+        (set header.auth_secret (params.auth_secret)))
+
+    (header)
+)
+
+; https://datatracker.ietf.org/doc/rfc8188/ | 2.1. Encryption Content-Coding Header
+(def-fn build_header header
+    (when (gt? (buf:len (header.keyid)) 255)
+        (throw "[build_header] keyid is too large"))
+
+    (concat 
+        (header.salt)
+        (buf:uint32be (header.rs))
+        (buf:uint8 (buf:len (header.keyid)))
+        (header.keyid)
+    )
+)
+
+(def-fn create_info base context
+    (concat "Content-Encoding: " (base) "\0" (context))
+)
+
+(def-fn extract_dh header mode
+    (when-not (header.public_key)
+        (throw "[extract_dh] public_key is required"))
+
+    (if (eq? "encrypt" (mode))
+        (set sender_pub_key (header.public_key))
+        (set receiver_pub_key (header.dh))
+    else
+        (set sender_pub_key (header.dh))
+        (set receiver_pub_key (header.public_key))
+    )
+
+    (set secret (openssl:derive (header.private_key_) (header.dh_)))
+
+    {
+        secret (secret)
+        context (concat
+            (header.keylabel)
+            "\0"
+            (buf:uint16be (buf:len (receiver_pub_key)))
+            (buf:uint16be (buf:len (sender_pub_key)))
+        )
+    }
+)
+
+(def-fn extract_secret_and_context header mode
+    (set result { "secret" null "context" "" })
+    (if (header.key)
+        (set result.secret (header.key))
+        (when (ne? (buf:len (result.secret)) (KEY_LENGTH))
+            (throw "[extract_secret_and_context] an explicit key must be (KEY_LENGTH) bytes"))
+    elif (header.dh)
+        (set result (extract_dh (header) (mode)))
+    elif (header.keyid)
+        ;(set result.secret (header.keymap[header.keyid]))
+        (throw "AAAAAAAAA")
+    )
+
+    (when-not (result.secret)
+        (throw "[extract_secret_and_context] unable to determine key"))
+
+    (if (header.auth_secret)
+        (set result.secret (hkdf (header.auth_secret) (result.secret) (create_info "auth" "") (SHA_256_LENGTH)))
+    )
+
+    (result)
+)
+
+(def-fn webpush_secret header mode
+
+    (when-not (header.auth_secret)
+        (throw "[webpush_secret] no authentication secret for webpush")
+    )
+
+    (if (eq? "encrypt" (mode))
+        (set sender_pub_key (header.public_key))
+        (assert (not-null? (sender_pub_key)) "sender_pub_key is null")
+        (set receiver_pub_key (header.dh))
+        (set remote_pub_key_ (header.dh_))
+    else
+        (throw "nooooo")
+        (set remote_pub_key_ (header.keyid))
+        (set sender_pub_key (header.dh))
+        (set receiver_pub_key (header.public_key))
+    )
+
+    ; violet
+    (hkdf (header.auth_secret) (openssl:derive (header.private_key_) (remote_pub_key_))
+        (concat
+            "WebPush: info\0"
+            (receiver_pub_key)
+            (sender_pub_key)
+        )
+        (SHA_256_LENGTH)
+    )
+)
+
+(def-fn extract_secret header mode
+    (when (header.key)
+        (when (ne? (buf:len (header.key)) (KEY_LENGTH))
+            (throw "[extract_secret] an explicit key must be (KEY_LENGTH) bytes"))
+        (ret (header.key))
+    )
+
+    (webpush_secret (header) (mode))
+)
+
+; https://datatracker.ietf.org/doc/rfc8188/ | 2.2. Content-Encryption Key Derivation and 2.3. Nonce Derivation
+(def-fn derive_key_and_nonce header mode
+    (when-not (header.salt)
+        (throw "[derive_key_and_nonce] must include a salt parameter for (header.version)"))
+
+    (if (eq? "aesgcm" (header.version))
+        (set s (extract_secret_and_context (header) (mode)))
+        (set cek_info (create_info "aesgcm" (s.context)))
+        (set nonce_info (create_info "nonce" (s.context)))
+        (set secret (s.secret))
+    elif (eq? "aes128gcm" (header.version))
+        (set cek_info "Content-Encoding: aes128gcm\0")
+        (set nonce_info "Content-Encoding: nonce\0")
+        (set secret (extract_secret (header) (mode)))
+    else
+        (throw "[derive_key_and_nonce] unable to set context for mode (header.version)")
+    )
+
+    (set prk (hkdf:extract (header.salt) (secret)))
+
+    {
+        "cek" (hkdf:expand (prk) (cek_info) (KEY_LENGTH))
+        "nonce" (hkdf:expand (prk) (nonce_info) (NONCE_LENGTH))
+    }
+)
+
+;; seq is 96-bit integer?
+(def-fn generate_nonce nonce seq
+
+    (set mask (math:from-hex "ffffff"))
+    (set m (buf:slice -6 (nonce)))
+
+    (set seq_hi (shr (seq) 24))
+    (set seq_lo (bit-and (seq) (mask)))
+
+    (set m_hi (shr (buf:uint32be (m) 0) 8))
+    (set m_lo (bit-and (buf:uint32be (m) 2) (mask)))
+
+    (set res_lo (bit-and (mask) (bit-xor (m_lo) (seq_lo))))
+    (set res_hi (bit-and (mask) (bit-xor (m_hi) (seq_hi))))
+
+    (concat 
+        (buf:slice 0 -6 (nonce))
+        (buf:slice 1 (buf:uint32be (res_hi)))
+        (buf:slice 1 (buf:uint32be (res_lo)))
+    )
+)
+
+(def-fn encrypt_record key counter buffer pad header last
+    (set pad (or (pad) 0))
+    (set nonce (generate_nonce (key.nonce) (counter)))
+
+    (set pad_size (map:get { "aes128gcm" 1 "aesgcm" 2 } (header.version)))
+    (set plaintext "")
+
+    (if (ne? "aes128gcm" (header.version))
+        (append plaintext (lpad (+ (pad) (pad_size)) "\0" ""))
+        (append plaintext (buffer))
+        (when (and (not (last)) (lt? (buf:len (plaintext)) (header.rs)))
+            (throw "[encrypt_record] unable to pad to record size"))
+    else
+        (append plaintext (buffer))
+        (append plaintext (buf:uint8 (? (last) 2 1)))
+        (append plaintext (lpad (+ (pad) (pad_size) -1) "\0" ""))
+    )
+
+    (set result (openssl:encrypt "aes-128-gcm" (key.cek) (nonce) (plaintext)))
+    (when (ne? (buf:len (result.tag)) (TAG_LENGTH))
+        (throw "[encrypt_record] invalid tag generated"))
+
+    (concat (result.data) (result.tag))
+)
+
+
+
+
+;; Sets vapid information from the provided vapid_object.
+;; @params vapid_object dict<private_key:str, public_key:str, subject:str>
+(def-fn webpush:set-vapid vapid_object
+
+    (assert (not-null? (vapid_object.private_key)) "Field required: private_key")
+    (assert (not-null? (vapid_object.public_key)) "Field required: public_key")
+    (assert (not-null? (vapid_object.subject)) "Field required: subject")
+
+    (set local.vapid.subject (vapid_object.subject))
+    (set local.vapid.public_key (vapid_object.public_key))
+
+    (set local.vapid.private_key (openssl:import-private
+        (pem:encode "EC PRIVATE KEY"
+            (asn1:seq
+                (asn1:int 1) ; version
+                (asn1:octets (base64u:decode (vapid_object.private_key))) ; private key
+                (asn1:ctx
+                    (asn1:oid 1 2 840 10045 3 1 7) ; prime256v1
+                )
+            )
+        )
+    ))
+    (assert (not-null? (local.vapid.private_key)) "Unable to load vapid private key")
+)
+
+;; Loads subscription information from the provided object and returns a client object.
+;; @params subscription dict<endpoint:str, keys: dict<p256dh:str, auth:str>>
+(def-fn webpush:load-subscription subscription
+
+    (set public_key_buffer (base64u:decode (subscription.keys.p256dh)))
+    (set auth_secret_buffer (base64u:decode (subscription.keys.auth)))
+    (assert (eq? 16 (buf:len (auth_secret_buffer))) "subscription.keys.auth must be 16 bytes long")
+
+    (set public_key (openssl:import-public
+        (pem:encode "PUBLIC KEY"
+            (asn1:seq
+                (asn1:seq
+                    (asn1:oid 1 2 840 10045 2 1) ; ecPublicKey
+                    (asn1:oid 1 2 840 10045 3 1 7) ; prime256v1
+                )
+                (asn1:bits 520 (public_key_buffer))
+            )
+        )
+    ))
+    (assert (not-null? (public_key)) "Unable to load subscription public key")
+
+    {
+        endpoint (subscription.endpoint)
+        public_key_buffer (public_key_buffer)
+        auth_secret_buffer (auth_secret_buffer)
+        public_key (public_key)
+    }
+)
+
+(def-fn webpush:send client payload
+
+    (set payload (json:str (payload)))
+
+    (set local_private_key (openssl:create "EC" "prime256v1"))
+    (set local_private_key_buffer (der:extract "octets" (der:extract "octets" (openssl:export-private (local_private_key)))))
+    (set local_public_key (openssl:import-public (openssl:export-public (local_private_key))))
+    (set local_public_key_buffer (der:extract "bits" (openssl:export-public (local_private_key))))
+    (set shared_secret (openssl:derive (local_private_key) (client.public_key)))
+
+    ;; encrypt the payload
+    (set header (parse_params {
+            version "aes128gcm"
+            dh (client.public_key_buffer)
+            dh_ (client.public_key)
+            private_key (local_private_key_buffer)
+            private_key_ (local_private_key)
+            public_key (local_public_key_buffer)
+            public_key_ (client.public_key)
+            salt (openssl:random-bytes (KEY_LENGTH))
+            auth_secret (client.auth_secret_buffer)
+        }
+    ))
+
+    (when-not (header.salt)
+        (set header.salt (crypto:random-bytes (KEY_LENGTH))))
+
+    (set result "")
+    (when (eq? "aes128gcm" (header.version))
+        (when (and (header.private_key) (not (header.keyid)))
+            (set header.keyid (local_public_key_buffer)))
+        (append result (build_header (header)))
+    )
+
+    ; *************
+    (set key (derive_key_and_nonce (header) "encrypt"))
+
+    (set start 0)
+    (set pad_size (map:get { "aes128gcm" 1 "aesgcm" 2 } (header.version)))
+    (set overhead (pad_size))
+    (when (eq? "aes128gcm" (header.version))
+        (inc overhead (TAG_LENGTH)))
+
+    ; *************
+    ;(set pad (- 1024 (overhead) (buf:len (result)) (buf:len (payload))))
+    (set pad 0)
+    (set counter 0)
+    (set last false)
+
+    (while (not (last))
+        (set record_pad (min (- (header.rs) (overhead) 1) (pad)))
+        (when (ne? "aes128gcm" (header.version))
+            (set record_pad (min (- (shl 1 (* 8 (pad_size))) 1) (record_pad)))
+        )
+
+        (when (and (gt? (pad) 0) (zero? (record_pad)))
+            (inc record_pad) ; deal with perverse case of rs=overhead+1 with padding.
+        )
+
+        (dec pad (record_pad))
+        (set end (+ (start) (header.rs) (neg (overhead)) (neg (record_pad))))
+
+        (if (ne? "aes128gcm" (header.version))
+            (set last (gt? (end) (buf:len (payload))))
+        else
+            (set last (ge? (end) (buf:len (payload))))
+        )
+
+        (set last (and (last) (le? (pad) 0)))
+
+        (set encrypted_block (encrypt_record (key) (counter) (buf:slice (start) (- (end) (start) -1) (payload)) (record_pad) (header) (last)))
+        (append result (encrypted_block))
+
+        (set start (end))
+        (inc counter)
+    )
+
+    (set final_payload (result))
+
+    (set jwt_token (jwt:sign (local.vapid.private_key) {
+        aud (jwt:get-aud (client.endpoint))
+        sub (local.vapid.subject)
+    }))
+
+    (request:headers [
+        "Content-Length: (buf:len (final_payload))"
+        "Content-Type: application/octet-stream"
+        "Content-Encoding: aes128gcm"
+        "Authorization: vapid t=(jwt_token); k=(local.vapid.public_key)"
+        "Urgency: normal"
+        "TTL: 2419200"
+    ])
+
+    (request:post (client.endpoint) (final_payload))
+
+    (echo "\n\e[94mResponse:\e[0m (request:status)")
+    (when (request:data)
+        (echo "\e[94mData:\e[0m (request:data)"))
+)
